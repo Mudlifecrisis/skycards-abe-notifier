@@ -1,0 +1,278 @@
+Aircraft API
+
+
+GET
+/aircrafts/{searchBy}/{searchParam}
+Single aircraft (by tail-number, Mode-S or ID) [TIER 1]
+
+
+
+GET
+/aircrafts/{searchBy}/{searchParam}/registrations
+Single aircraft registration history (by tail-number, Mode-S or ID) [TIER 1]
+
+
+
+GET
+/aircrafts/{searchBy}/{searchParam}/all
+Aircraft by tail-number, Mode-S or ID [TIER 1]
+
+
+
+GET
+/airlines/{airlineCode}/aircrafts
+Airline fleet / Aircraft list by airline code (BETA) [TIER 3]
+
+
+
+GET
+/aircrafts/reg/{reg}/image/beta
+Aircraft image by tail-number (BETA) [TIER 2]
+
+
+
+POST
+/aircrafts/recognize/beta
+Aicraft image recognition (BETA) [TIER 3]
+
+
+
+GET
+/aircrafts/search/term
+Search active aircraft tail numbers by term [TIER 2]
+
+
+Airport API
+
+
+GET
+/airports/{codeType}/{code}
+Airport by code [TIER 1]
+
+
+
+GET
+/airports/{codeType}/{code}/runways
+Airport runways [TIER 1]
+
+
+
+GET
+/airports/search/location
+Search airports by location [TIER 2]
+
+
+
+GET
+/airports/search/ip
+Search airports by IP address geolocation [TIER 2]
+
+
+
+GET
+/airports/search/term
+Search airports by free text [TIER 2]
+
+
+Flight Alert API
+
+
+POST
+/subscriptions/webhook/{subjectType}/{subjectId}
+Create web-hook subscription [TIER 4]
+
+
+
+GET
+/subscriptions/webhook/{subscriptionId}
+Get web-hook subscription [FREE TIER]
+
+
+
+DELETE
+/subscriptions/webhook/{subscriptionId}
+Remove web-hook subscription [FREE TIER]
+
+
+
+GET
+/subscriptions/webhook
+List web-hook subscriptions [FREE TIER]
+
+
+
+PATCH
+/subscriptions/webhook/{subscriptionId}/refresh
+Refresh web-hook subscription [TIER 4]
+
+
+Flight API
+
+
+GET
+/flights/{searchBy}/{searchParam}
+Flight Status (single day) [TIER 2]
+
+
+
+GET
+/flights/{searchBy}/{searchParam}/{dateLocal}
+Flight Status (single day) [TIER 2]
+
+
+
+GET
+/flights/{searchBy}/{searchParam}/{dateFromLocal}/{dateToLocal}
+Flight History and Schedule (range of days) [TIER 3]
+
+
+
+GET
+/flights/{searchBy}/{searchParam}/dates
+Flight departure dates [TIER 2]
+
+
+
+GET
+/flights/{searchBy}/{searchParam}/dates/{fromLocal}/{toLocal}
+Flight departure dates [TIER 2]
+
+
+
+GET
+/flights/airports/{codeType}/{code}/{fromLocal}/{toLocal}
+FIDS (airport departures and arrivals) - by local time range [TIER 2]
+
+
+
+GET
+/flights/airports/{codeType}/{code}
+FIDS (airport departures and arrivals) - by relative time / by current time [TIER 2]
+
+
+
+GET
+/flights/search/term
+Search flight numbers by term [TIER 2]
+
+
+Healthcheck API
+
+
+GET
+/health/services/feeds/{service}
+General status of data feed services [FREE TIER]
+
+
+
+GET
+/health/services/airports/{icao}/feeds
+Data feed services status by ICAO code [FREE TIER]
+
+
+
+GET
+/health/services/feeds/{service}/airports
+Airports supporting data feed service [FREE TIER]
+
+
+Industry API
+
+
+GET
+/industry/faa-ladd/{id}/status
+FAA LADD Aircraft Status [TIER 3]
+
+
+Miscellaneous API
+
+
+GET
+/airports/{codeType}/{code}/time/local
+Current local time at the airport [TIER 1]
+
+
+
+GET
+/airports/{codeType}/{code}/time/solar
+Solar and day time at the airport [TIER 1]
+
+
+
+GET
+/airports/{codeType}/{code}/time/solar/{dateLocal}
+Solar and day time at the airport [TIER 1]
+
+
+
+GET
+/airports/{codeType}/{codeFrom}/distance-time/{codeTo}
+🤖 Distance and flight time between airports [TIER 2]
+
+
+
+GET
+/airports/{codeType}/{code}/weather
+Weather / forecast at the airport [TIER 2]
+
+
+
+GET
+/airports/{codeType}/{code}/weather/{fromLocal}/{toLocal}
+Weather / forecast at the airport [TIER 2]
+
+
+
+GET
+/countries
+Get all countries [TIER 1]
+
+
+Statistical API
+
+
+GET
+/airports/{codeType}/{code}/delays
+Airport delays (current or historical moment) [TIER 3]
+
+
+
+GET
+/airports/{codeType}/{code}/delays/{dateLocal}
+Airport delays (current or historical moment) [TIER 3]
+
+
+
+GET
+/airports/{codeType}/{code}/delays/{dateFromLocal}/{dateToLocal}
+Airport delays (historical period) [TIER 3]
+
+
+
+GET
+/airports/{codeType}/{code}/stats/routes/daily
+Airport routes and daily flight destinations [TIER 3]
+
+
+
+GET
+/airports/{codeType}/{code}/stats/routes/daily/{dateLocal}
+Airport routes and daily flight destinations [TIER 3]
+
+
+
+GET
+/airports/delays
+Global delays (current or historical moment) [TIER 3]
+
+
+
+GET
+/airports/delays/{dateUtc}
+Global delays (current or historical moment) [TIER 3]
+
+
+
+GET
+/flights/{number}/delays
+Flight delay statistics by flight number [TIER 3]

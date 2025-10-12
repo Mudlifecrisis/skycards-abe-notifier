@@ -17,7 +17,7 @@ load_dotenv()
 
 # Config
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-AVIATIONSTACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
+AERODATABOX_API_KEY = os.getenv("AERODATABOX_API_KEY")
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 DST_IATA = os.getenv("TARGET_AIRPORT_IATA", "ABE").upper()
 
@@ -45,20 +45,52 @@ tree = discord.app_commands.CommandTree(bot)
 RARITY = RarityLookup()
 SIGNAL = LiveSignal()
 
-AVIATIONSTACK_BASE = "http://api.aviationstack.com/v1/flights"
+AERODATABOX_BASE = "https://aerodatabox.p.rapidapi.com"
 
 async def fetch_arrivals(dst_iata: str) -> list[dict]:
-    params = {
-        "access_key": AVIATIONSTACK_API_KEY,
-        "limit": 100,
-        "arr_iata": dst_iata,
-        "flight_status": "active"
+    # Use FIDS endpoint for airport arrivals and departures
+    url = f"{AERODATABOX_BASE}/flights/airports/iata/{dst_iata}"
+    headers = {
+        "X-RapidAPI-Key": AERODATABOX_API_KEY,
+        "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"
     }
+    
     async with aiohttp.ClientSession() as session:
-        async with session.get(AVIATIONSTACK_BASE, params=params, timeout=20) as r:
+        async with session.get(url, headers=headers, timeout=20) as r:
             r.raise_for_status()
             data = await r.json()
-            return data.get("data") or []
+            
+            # Extract arrivals from FIDS response
+            arrivals = data.get("arrivals", [])
+            
+            # Convert AeroDataBox format to our expected format
+            converted_flights = []
+            for flight in arrivals:
+                converted_flight = {
+                    "flight": {
+                        "iata": flight.get("number", ""),
+                        "number": flight.get("number", "")
+                    },
+                    "airline": {
+                        "name": flight.get("airline", {}).get("name", "Unknown Airline")
+                    },
+                    "departure": {
+                        "iata": flight.get("departure", {}).get("airport", {}).get("iata", "")
+                    },
+                    "arrival": {
+                        "iata": flight.get("arrival", {}).get("airport", {}).get("iata", ""),
+                        "scheduled": flight.get("arrival", {}).get("scheduledTimeLocal"),
+                        "estimated": flight.get("arrival", {}).get("estimatedTimeLocal")
+                    },
+                    "aircraft": {
+                        "registration": flight.get("aircraft", {}).get("reg", ""),
+                        "icao": flight.get("aircraft", {}).get("model", ""),
+                        "iata": flight.get("aircraft", {}).get("model", "")
+                    }
+                }
+                converted_flights.append(converted_flight)
+            
+            return converted_flights
 
 def in_quiet_hours(now_local_hour: int) -> bool:
     if QUIET_START == QUIET_END == 0:

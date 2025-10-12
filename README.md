@@ -9,7 +9,7 @@ A Discord bot that monitors aircraft arrivals to help you get high scores in Sky
 
 ## Features
 
-- **Real-time Flight Monitoring**: Uses AviationStack API to monitor active flights
+- **Real-time Flight Monitoring**: Uses AeroDataBox API to monitor active flights
 - **Smart Alert Window**: Only alerts 10-30 minutes before arrival (configurable)
 - **Rarity System**: Shows aircraft rarity using Season-1 formula (rarity = 7.5 - ln(FTEA))
 - **De-duplication**: Won't spam you with the same flight multiple times per day
@@ -29,10 +29,10 @@ A Discord bot that monitors aircraft arrivals to help you get high scores in Sky
    - Use Slash Commands
    - Embed Links
 
-### 2. Get AviationStack API Key
+### 2. Get AeroDataBox API Key
 
-1. Sign up at [AviationStack](https://aviationstack.com/)
-2. Get your free API key (1000 requests/month)
+1. Sign up at [AeroDataBox via API.Market](https://api.market/store/aedbx/aerodatabox)
+2. Get your API key (free tier: 300-600 calls/month, $5/month: 3,000 calls)
 
 ### 3. Install and Configure
 
@@ -54,7 +54,7 @@ cp .env.template .env
 Copy `.env.template` to `.env` and fill in:
 
 - `DISCORD_BOT_TOKEN`: Your Discord bot token
-- `AVIATIONSTACK_API_KEY`: Your AviationStack API key  
+- `AERODATABOX_API_KEY`: Your AeroDataBox API key  
 - `DISCORD_CHANNEL_ID`: Channel where alerts will be posted
 - `TARGET_AIRPORT_IATA`: Airport to monitor (ABE, JFK, LAX, etc.)
 
@@ -101,7 +101,7 @@ To get enhanced notifications from official Skycards channels:
 
 ## Troubleshooting
 
-- **No alerts**: Check your AviationStack API key and make sure flights are active to your airport
+- **No alerts**: Check your AeroDataBox API key and make sure flights are active to your airport
 - **Bot offline**: Verify Discord bot token and permissions
 - **Wrong airport**: Update `TARGET_AIRPORT_IATA` in `.env`
 - **Too many alerts**: Increase `MIN_RARITY` or adjust alert window
