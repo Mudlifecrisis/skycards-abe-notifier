@@ -1,0 +1,517 @@
+Skycards ABE Notifier — Complete Handoff
+0) One-paragraph summary (for context)
+
+Build on top of DanteSc03/DiscordFlightBot (https://github.com/DanteSc03/DiscordFlightBot) to create a Discord bot that:
+
+Watches inbound flights to ABE (KABE) via AviationStack.
+
+Sends an alert 10–30 minutes before arrival (de-duped, concise embed).
+
+Annotates/filters by rarity using the Season-1 formula (rarity = 7.5 − ln(FTEA)) from a supplied aircraft list.
+
+Boosts/tag alerts using mirrored Skycards Discord “rare”, “glow”, and “daily mission” announcement channels followed into our server.
+
+Optional QoL: slash commands, quiet hours, distance gates (future).
+
+Important gameplay note: points for an airport leaderboard require catching inbound aircraft to that airport (not mere overflights). So we only alert on flights with destination = ABE/KABE.
+
+1) Tech stack & assumptions
+
+Python 3.10+
+
+Discord bot (discord.py), AviatonStack API
+
+No scraping of Skycards Discord; we follow their Announcement channels into our own server and parse the mirrored messages.
+
+We start with the structure from DanteSc03/DiscordFlightBot but the files below work standalone too.
+
+2) Project layout
+abe-notifier/
+  bot.py                    # main bot (loop, fetch, embeds, slash cmds)
+  alert_window.py           # ETA window logic + de-dupe
+  rarity.py                 # rarity lookup & tiers (from rarity.json / ftea.json)
+  alerts_sources.py         # parses mirrored "rare/glow/missions" posts in our server
+  build_rarity_json.py      # one-time CSV -> rarity.json / ftea.json generator
+  rarity.json               # generated from your aircraft list (optional if using ftea.json)
+  ftea.json                 # generated (optional); bot computes rarity = 7.5 - ln(FTEA) if present
+  seen_alerts.json          # runtime de-dupe store (auto-created)
+  requirements.txt
+  .env                      # your keys & settings (see below)
+
+3) .env (config)
+# --- Required ---
+DISCORD_BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN
+AVIATIONSTACK_API_KEY=YOUR_AVIATIONSTACK_KEY
+DISCORD_CHANNEL_ID=123456789012345678        # alerts target channel
+TARGET_AIRPORT_IATA=ABE                      # KABE/ABE
+
+# --- Alert window (minutes to ETA) ---
+ALERT_MINUTES_MIN=10
+ALERT_MINUTES_MAX=30
+
+# --- Rarity controls (Phase 2) ---
+SHOW_RARITY=1          # 1=show rarity in embeds
+MIN_RARITY=0.0         # e.g., 5.0 for Rare+ only, 7.0 Ultra-only
+
+# --- Skycards mirrored channels (Phase 3) ---
+RARE_CH_ID=0           # your server channel that receives mirrored "rare" posts
+GLOW_CH_ID=0           # your server channel that receives mirrored "glow" posts
+MISSION_CH_ID=0        # your server channel that receives mirrored "daily mission" posts
+RARE_ROLE_ID=0         # optional role to @ when rare/ultra
+GLOW_ROLE_ID=0         # optional role to @ when glow
+
+# --- Optional QoL ---
+QUIET_START=0          # 0-23 local hour quiet start (no alerts); set both to 0 to disable
+QUIET_END=0            # 0-23 local hour quiet end
+
+4) requirements.txt
+discord.py>=2.3.2
+aiohttp>=3.9.5
+python-dotenv>=1.0.1
+python-dateutil>=2.9.0.post0
+pytz>=2024.1
+
+5) Scripts / modules
+5.1 alert_window.py
+# alert_window.py
+import json
+from datetime import datetime, timezone
+from dateutil import parser
+
+SEEN_FILE = "seen_alerts.json"
+
+def _load_seen() -> set[str]:
+    try:
+        with open(SEEN_FILE, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+def _save_seen(seen: set[str]) -> None:
+    try:
+        with open(SEEN_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(seen), f)
+    except Exception:
+        pass
+
+def minutes_until(iso_ts: str | None) -> float | None:
+    if not iso_ts:
+        return None
+    try:
+        dt = parser.isoparse(iso_ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return (dt - datetime.now(timezone.utc)).total_seconds() / 60.0
+    except Exception:
+        return None
+
+def pick_eta(arrival: dict) -> str | None:
+    """Prefer estimated arrival; fallback to scheduled (ISO-8601 strings)."""
+    return arrival.get("estimated") or arrival.get("scheduled")
+
+def make_alert_key(flight: dict, eta_iso: str | None) -> str:
+    f = flight.get("flight") or {}
+    fnum = (f.get("iata") or f.get("number") or "UNKNOWN").upper()
+    day_key = (eta_iso or "")[:10]  # YYYY-MM-DD
+    return f"{fnum}@{day_key}"
+
+def should_alert_window(flight: dict, dst_iata: str, min_min: int, max_min: int) -> tuple[bool, str | None, float | None]:
+    """
+    True if:
+      - destination matches dst_iata
+      - ETA minutes in [min_min, max_min]
+      - not alerted before today
+    Returns (ok, eta_iso, minutes)
+    """
+    arrival = flight.get("arrival") or {}
+    dst = (arrival.get("iata") or arrival.get("airport") or "").upper()
+    if dst != dst_iata.upper():
+        return (False, None, None)
+
+    eta_iso = pick_eta(arrival)
+    mins = minutes_until(eta_iso)
+    if mins is None:
+        return (False, eta_iso, None)
+    if mins < min_min or mins > max_min:
+        return (False, eta_iso, mins)
+
+    key = make_alert_key(flight, eta_iso)
+    seen = _load_seen()
+    if key in seen:
+        return (False, eta_iso, mins)
+    seen.add(key)
+    _save_seen(seen)
+    return (True, eta_iso, mins)
+
+5.2 rarity.py
+# rarity.py
+import json
+import math
+from typing import Optional, Tuple
+
+class RarityLookup:
+    """Loads rarity or FTEA tables and returns a numeric rarity score.
+
+    rarity = 7.5 - ln(FTEA)  (natural log)
+    """
+    def __init__(self, rarity_file: str = "rarity.json", ftea_file: str = "ftea.json"):
+        self.by_rarity: dict[str, float] = {}
+        self.by_ftea: dict[str, float] = {}
+        try:
+            with open(rarity_file, "r", encoding="utf-8") as f:
+                self.by_rarity = {k.upper(): float(v) for k, v in json.load(f).items()}
+        except Exception:
+            pass
+        try:
+            with open(ftea_file, "r", encoding="utf-8") as f:
+                self.by_ftea = {k.upper(): float(v) for k, v in json.load(f).items()}
+        except Exception:
+            pass
+
+    @staticmethod
+    def rarity_from_ftea(ftea: float) -> float:
+        return 7.5 - math.log(max(ftea, 1e-6))
+
+    def get(self, icao: Optional[str], iata: Optional[str]) -> Optional[float]:
+        for code in [icao, iata]:
+            if not code:
+                continue
+            code = code.upper()
+            if code in self.by_rarity:
+                return float(self.by_rarity[code])
+            if code in self.by_ftea:
+                return float(self.rarity_from_ftea(self.by_ftea[code]))
+        return None
+
+def rarity_tier(score: float) -> Tuple[str, str]:
+    if score >= 7.0:
+        return ("💎", "Ultra-rare")
+    if score >= 5.0:
+        return ("🟣", "Rare")
+    if score >= 3.0:
+        return ("🔵", "Uncommon")
+    return ("⚪", "Common")
+
+5.3 alerts_sources.py
+# alerts_sources.py
+import re
+
+# Extremely simple heuristic parser; feel free to replace with a stricter one.
+RE_CODE = re.compile(r"\b[A-Z0-9]{3,4}\b")
+
+def parse_types_from_text(text: str) -> set[str]:
+    return set(m.group(0).upper() for m in RE_CODE.finditer(text or ""))
+
+class LiveSignal:
+    """Keeps live sets of special types (from mirrored Discord channels)."""
+    def __init__(self):
+        self.glow_types: set[str] = set()
+        self.rare_types: set[str] = set()
+        self.mission_needles: set[str] = set()
+
+    def handle_rare_post(self, content: str) -> None:
+        self.rare_types.update(parse_types_from_text(content))
+
+    def handle_glow_post(self, content: str) -> None:
+        self.glow_types.update(parse_types_from_text(content))
+
+    def handle_mission_post(self, content: str) -> None:
+        # Save words/codes that look like targets; you can add smarter logic here.
+        self.mission_needles.update(parse_types_from_text(content))
+
+5.4 build_rarity_json.py (one-time CSV → JSON)
+# build_rarity_json.py
+import csv, json, sys
+
+# Adjust these to match your CSV column headers:
+COL_ICAO = "ICAO Type"   # e.g., B738
+COL_IATA = "IATA Type"   # e.g., 738
+COL_RARITY = "Rarity"    # numeric rarity, if present
+COL_FTEA = "FTEA"        # numeric FTEA, if present
+
+in_csv = sys.argv[1] if len(sys.argv) > 1 else "aircraft_list.csv"
+by_rarity, by_ftea = {}, {}
+
+with open(in_csv, newline='', encoding="utf-8") as f:
+    r = csv.DictReader(f)
+    for row in r:
+        icao = (row.get(COL_ICAO) or "").strip().upper()
+        iata = (row.get(COL_IATA) or "").strip().upper()
+        def put(dct, k, v):
+            if k: dct[k] = v
+            elif iata: dct[iata] = v
+
+        if row.get(COL_RARITY):
+            try:
+                put(by_rarity, icao, float(row[COL_RARITY]))
+            except: pass
+
+        if row.get(COL_FTEA):
+            try:
+                put(by_ftea, icao, float(row[COL_FTEA]))
+            except: pass
+
+with open("rarity.json", "w", encoding="utf-8") as f:
+    json.dump(by_rarity, f, indent=2)
+with open("ftea.json", "w", encoding="utf-8") as f:
+    json.dump(by_ftea, f, indent=2)
+print(f"wrote rarity.json ({len(by_rarity)} types) and ftea.json ({len(by_ftea)} types)")
+
+5.5 bot.py (full, drop-in)
+# bot.py
+import os
+import aiohttp
+import asyncio
+from datetime import datetime
+import pytz
+
+import discord
+from discord.ext import tasks
+from dotenv import load_dotenv
+
+from alert_window import should_alert_window, pick_eta, minutes_until
+from rarity import RarityLookup, rarity_tier
+from alerts_sources import LiveSignal
+
+load_dotenv()
+
+# Config
+BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+AVIATIONSTACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+DST_IATA = os.getenv("TARGET_AIRPORT_IATA", "ABE").upper()
+
+WIN_MIN = int(os.getenv("ALERT_MINUTES_MIN", "10"))
+WIN_MAX = int(os.getenv("ALERT_MINUTES_MAX", "30"))
+
+SHOW_RARITY = os.getenv("SHOW_RARITY", "1") == "1"
+MIN_RARITY = float(os.getenv("MIN_RARITY", "0"))
+
+RARE_CH_ID = int(os.getenv("RARE_CH_ID", "0"))
+GLOW_CH_ID = int(os.getenv("GLOW_CH_ID", "0"))
+MISSION_CH_ID = int(os.getenv("MISSION_CH_ID", "0"))
+RARE_ROLE_ID = int(os.getenv("RARE_ROLE_ID", "0"))
+GLOW_ROLE_ID = int(os.getenv("GLOW_ROLE_ID", "0"))
+
+QUIET_START = int(os.getenv("QUIET_START", "0"))  # 0 disables if both 0
+QUIET_END = int(os.getenv("QUIET_END", "0"))
+
+# Objects
+intents = discord.Intents.default()
+intents.message_content = True
+bot = discord.Client(intents=intents)
+tree = discord.app_commands.CommandTree(bot)
+
+RARITY = RarityLookup()
+SIGNAL = LiveSignal()
+
+AVIATIONSTACK_BASE = "http://api.aviationstack.com/v1/flights"
+
+async def fetch_arrivals(dst_iata: str) -> list[dict]:
+    params = {
+        "access_key": AVIATIONSTACK_API_KEY,
+        "limit": 100,
+        "arr_iata": dst_iata,
+        "flight_status": "active"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(AVIATIONSTACK_BASE, params=params, timeout=20) as r:
+            r.raise_for_status()
+            data = await r.json()
+            return data.get("data") or []
+
+def in_quiet_hours(now_local_hour: int) -> bool:
+    if QUIET_START == QUIET_END == 0:
+        return False
+    if QUIET_START < QUIET_END:
+        return QUIET_START <= now_local_hour < QUIET_END
+    # wraps midnight
+    return now_local_hour >= QUIET_START or now_local_hour < QUIET_END
+
+def priority_for(ac_icao: str | None, rarity_value: float | None) -> int:
+    ac_icao = (ac_icao or "").upper()
+    if ac_icao in SIGNAL.glow_types:
+        return 0
+    if rarity_value is not None and rarity_value >= 7.0:
+        return 1
+    if ac_icao in SIGNAL.rare_types or (rarity_value or 0) >= 5.0:
+        return 2
+    return 3
+
+async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: float | None, prio: int):
+    airline = (flight.get("airline") or {}).get("name") or "Unknown Airline"
+    f = flight.get("flight") or {}
+    fnum = f.get("iata") or f.get("number") or "Unknown"
+    dep = (flight.get("departure") or {}).get("iata") or "???"
+    arr = (flight.get("arrival") or {}).get("iata") or "???"
+    ac = flight.get("aircraft") or {}
+    reg = ac.get("registration") or "?"
+    ac_icao = (ac.get("icao") or "").upper()
+    ac_iata = (ac.get("iata") or "").upper()
+
+    eta_iso = pick_eta(flight.get("arrival") or {})
+    mins = minutes_until(eta_iso) or 0
+
+    # Labels/tags/mentions
+    tag = ""
+    mention = None
+    if ac_icao in SIGNAL.glow_types:
+        tag = "✨ GLOW"
+        if GLOW_ROLE_ID:
+            mention = f"<@&{GLOW_ROLE_ID}>"
+    elif rarity_value is not None and rarity_value >= 7.0:
+        tag = "💎 ULTRA"
+        if RARE_ROLE_ID:
+            mention = f"<@&{RARE_ROLE_ID}>"
+    elif ac_icao in SIGNAL.rare_types or (rarity_value or 0) >= 5.0:
+        tag = "🟣 RARE"
+
+    title = f"{tag} {airline} {fnum} → {arr}".strip()
+    embed = discord.Embed(
+        title=title,
+        description=f"From **{dep}** | ETA ~ **{mins:.0f} min**"
+    )
+    if reg != "?":
+        embed.add_field(name="Registration", value=reg, inline=True)
+    if ac_icao or ac_iata:
+        embed.add_field(name="Aircraft", value=(ac_iata or ac_icao), inline=True)
+    if SHOW_RARITY and rarity_value is not None:
+        emoji, tier = rarity_tier(rarity_value)
+        embed.add_field(name="Rarity", value=f"{rarity_value:.2f} {emoji} {tier}", inline=True)
+    if eta_iso:
+        embed.add_field(name="ETA (ISO)", value=eta_iso, inline=False)
+
+    await channel.send(content=mention, embed=embed)
+
+@tasks.loop(seconds=120)
+async def abe_watch():
+    await bot.wait_until_ready()
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        return
+
+    local_hour = datetime.now().hour
+    if in_quiet_hours(local_hour):
+        return
+
+    try:
+        flights = await fetch_arrivals(DST_IATA)
+    except Exception:
+        return
+
+    enriched: list[tuple[int, float | None, dict]] = []
+    for fl in flights:
+        ok, eta_iso, mins = should_alert_window(fl, DST_IATA, WIN_MIN, WIN_MAX)
+        if not ok:
+            continue
+        ac = fl.get("aircraft") or {}
+        ac_icao = (ac.get("icao") or "").upper()
+        ac_iata = (ac.get("iata") or "").upper()
+        rscore = RARITY.get(ac_icao, ac_iata)
+
+        if rscore is not None and rscore < MIN_RARITY:
+            continue
+
+        prio = priority_for(ac_icao, rscore)
+        enriched.append((prio, rscore, fl))
+
+    enriched.sort(key=lambda t: t[0])
+    for prio, rscore, fl in enriched:
+        try:
+            await post_alert(channel, fl, rscore, prio)
+            await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
+@bot.event
+async def on_message(msg: discord.Message):
+    # Listen for mirrored announcements in our own server.
+    if msg.author.bot:
+        if msg.channel.id == RARE_CH_ID:
+            SIGNAL.handle_rare_post(msg.content)
+        elif msg.channel.id == GLOW_CH_ID:
+            SIGNAL.handle_glow_post(msg.content)
+        elif msg.channel.id == MISSION_CH_ID:
+            SIGNAL.handle_mission_post(msg.content)
+    await bot.process_commands(msg)
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (id: {bot.user.id})")
+    try:
+        await tree.sync()
+    except Exception:
+        pass
+    if not abe_watch.is_running():
+        abe_watch.start()
+
+# Slash commands (QoL)
+@tree.command(name="watch", description="Set alert window (minutes)")
+async def _watch(inter: discord.Interaction, min: int, max: int):
+    global WIN_MIN, WIN_MAX
+    WIN_MIN, WIN_MAX = min, max
+    await inter.response.send_message(f"Window set to {min}–{max} minutes.", ephemeral=True)
+
+@tree.command(name="rarity_min", description="Set minimum rarity threshold")
+async def _rarity_min(inter: discord.Interaction, value: float):
+    global MIN_RARITY
+    MIN_RARITY = value
+    await inter.response.send_message(f"Minimum rarity set to {value:.2f}.", ephemeral=True)
+
+if __name__ == "__main__":
+    bot.run(BOT_TOKEN)
+
+6) Setup steps (CLI)
+# 1) Clone base repo (optional) or start fresh in an empty folder
+# git clone https://github.com/DanteSc03/DiscordFlightBot
+# cd DiscordFlightBot  # or your new folder "abe-notifier"
+
+# 2) Create virtual env (optional but recommended)
+python -m venv .venv
+. .venv/bin/activate  # on Windows: .venv\Scripts\activate
+
+# 3) Create files as listed above & install deps
+pip install -r requirements.txt
+
+# 4) Add your .env with tokens/IDs (see section 3)
+#    - Create your Discord bot & invite it to your server
+#    - Create the target alerts channel & copy its ID
+
+# 5) (Optional) Convert your aircraft CSV -> rarity/ftae JSONs
+python build_rarity_json.py your_aircraft_list.csv
+
+# 6) Run
+python bot.py
+
+7) How the bot behaves
+
+Every 2 minutes it pulls active flights with arr_iata=ABE.
+
+Computes minutes to ETA (estimated → fallback scheduled).
+
+Alerts when ETA is within 10–30 minutes, once per flight/day (de-dupe).
+
+If rarity.json/ftea.json provided:
+
+Adds rarity score + tier to embeds.
+
+Respects MIN_RARITY to cut noise.
+
+If Skycards channels are followed into your server and IDs provided:
+
+Tags ✨ GLOW / 💎 ULTRA / 🟣 RARE and can @ roles.
+
+8) Notes & tradeoffs
+
+AviationStack free tier can lag; widen window (e.g., 12–35) or move to a lower-latency API later.
+
+For distance-based alerts (e.g., “within 15 nm of KABE”), you’ll need an API that returns position; filter by great-circle distance to KABE.
+
+The rarity system assumes you provide either per-type RARITY or FTEA. If you only have some types, it still works—others just won’t show a rarity.
+
+9) What to ask Claude to do (prompt)
+
+
+
