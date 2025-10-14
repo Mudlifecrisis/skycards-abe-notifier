@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from alert_window import should_alert_window, pick_eta, minutes_until
 from rarity import RarityLookup, rarity_tier
 from alerts_sources import LiveSignal
+from rare_hunter import RareAircraftHunter
 
 load_dotenv()
 
@@ -38,12 +39,13 @@ QUIET_END = int(os.getenv("QUIET_END", "0"))
 
 # Objects
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # Re-enable for full functionality
 bot = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(bot)
 
 RARITY = RarityLookup()
 SIGNAL = LiveSignal()
+HUNTER = RareAircraftHunter()
 
 AERODATABOX_BASE = "https://aerodatabox.p.rapidapi.com"
 
@@ -195,9 +197,79 @@ async def abe_watch():
         except Exception:
             pass
 
+async def post_rare_alert(channel: discord.TextChannel, aircraft: dict):
+    """Post rare aircraft alert to Discord"""
+    callsign = aircraft.get('callsign', 'Unknown')
+    country = aircraft.get('origin_country', 'Unknown')
+    matched_term = aircraft.get('matched_term', '')
+    
+    # Format location
+    lat = aircraft.get('latitude', 0)
+    lon = aircraft.get('longitude', 0)
+    
+    # Format altitude and speed
+    alt_text = ""
+    if aircraft.get('altitude_ft'):
+        alt_text = f"{aircraft['altitude_ft']:,} ft"
+        
+    speed_text = ""
+    if aircraft.get('velocity_kts'):
+        speed_text = f"{aircraft['velocity_kts']} kts"
+    
+    title = f"🎯 **RARE AIRCRAFT FOUND** - {matched_term}"
+    
+    embed = discord.Embed(
+        title=title,
+        description=f"**{callsign}** from {country}",
+        color=0xFF6B35  # Orange color for rare alerts
+    )
+    
+    if lat and lon:
+        embed.add_field(name="Location", value=f"{lat:.4f}, {lon:.4f}", inline=True)
+        # Add Google Maps link
+        maps_url = f"https://maps.google.com/?q={lat},{lon}"
+        embed.add_field(name="Maps Link", value=f"[View on Map]({maps_url})", inline=True)
+    
+    if alt_text:
+        embed.add_field(name="Altitude", value=alt_text, inline=True)
+        
+    if speed_text:
+        embed.add_field(name="Speed", value=speed_text, inline=True)
+        
+    embed.add_field(name="ICAO24", value=aircraft.get('icao24', 'Unknown'), inline=True)
+    embed.add_field(name="Detected", value=f"<t:{int(datetime.now().timestamp())}:R>", inline=True)
+    
+    # Add Skycards context
+    embed.set_footer(text="💡 Use 'Catch Anywhere' item in Skycards to catch this aircraft!")
+    
+    await channel.send(embed=embed)
+
+@tasks.loop(seconds=180)  # Check every 3 minutes
+async def rare_hunt():
+    """Global rare aircraft hunting loop"""
+    await bot.wait_until_ready()
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        return
+        
+    try:
+        rare_aircraft = await HUNTER.find_rare_aircraft()
+        
+        for aircraft in rare_aircraft:
+            try:
+                await post_rare_alert(channel, aircraft)
+                await asyncio.sleep(1)  # Brief pause between alerts
+            except Exception as e:
+                print(f"Error posting rare alert: {e}")
+                
+    except Exception as e:
+        print(f"Rare hunting error: {e}")
+
 @bot.event
 async def on_message(msg: discord.Message):
-    # Listen for mirrored announcements in our own server.
+    print(f"Message received: '{msg.content}' from {msg.author.name} in #{msg.channel.name}")
+    
+    # Skip bot messages for mirroring
     if msg.author.bot:
         if msg.channel.id == RARE_CH_ID:
             SIGNAL.handle_rare_post(msg.content)
@@ -205,17 +277,95 @@ async def on_message(msg: discord.Message):
             SIGNAL.handle_glow_post(msg.content)
         elif msg.channel.id == MISSION_CH_ID:
             SIGNAL.handle_mission_post(msg.content)
-    await bot.process_commands(msg)
+        return
+    
+    print(f"Processing user message: {msg.content}")
+    
+    # Simple text commands for testing
+    if msg.content.startswith("!add "):
+        print("Adding search term...")
+        term = msg.content[5:].strip()
+        HUNTER.add_search_term(term)
+        await msg.reply(f"✅ Added **{term.upper()}** to rare aircraft search!")
+        
+    elif msg.content == "!list":
+        print("Listing search terms...")
+        terms = HUNTER.get_search_terms()
+        if terms:
+            await msg.reply(f"🔍 Searching for: {', '.join(terms)}")
+        else:
+            await msg.reply("No search terms. Use `!add chinook` to add some!")
+            
+    elif msg.content == "!stats":
+        print("Showing stats...")
+        terms = HUNTER.get_search_terms()
+        await msg.reply(f"📊 **Rare Hunter Stats**\n• {len(terms)} search terms active\n• Scanning every 3 minutes globally\n• Airport monitoring: ABE")
+        
+    elif msg.content == "!hunt" or msg.content == "!force" or msg.content == "!search":
+        print("Force hunting for rare aircraft...")
+        await msg.reply("🔍 **Force searching globally for rare aircraft...**")
+        
+        try:
+            rare_aircraft = await HUNTER.find_rare_aircraft()
+            
+            if rare_aircraft:
+                await msg.reply(f"✅ Found **{len(rare_aircraft)}** rare aircraft! Posting alerts...")
+                
+                for aircraft in rare_aircraft:
+                    try:
+                        await post_rare_alert(msg.channel, aircraft)
+                        await asyncio.sleep(1)  # Brief pause between alerts
+                    except Exception as e:
+                        print(f"Error posting force alert: {e}")
+            else:
+                await msg.reply("❌ No rare aircraft found matching your search terms right now.")
+                
+        except Exception as e:
+            print(f"Force hunt error: {e}")
+            await msg.reply(f"❌ Error during force search: {str(e)}")
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (id: {bot.user.id})")
     try:
-        await tree.sync()
-    except Exception:
-        pass
-    if not abe_watch.is_running():
-        abe_watch.start()
+        # Get your Discord server (guild) for instant command sync
+        guild_id = CHANNEL_ID  # We'll derive guild from channel
+        channel = bot.get_channel(CHANNEL_ID)
+        if channel:
+            guild = channel.guild
+            synced = await tree.sync(guild=guild)
+            print(f"✅ Synced {len(synced)} commands to {guild.name} (instant)")
+        else:
+            synced = await tree.sync()
+            print(f"✅ Synced {len(synced)} global commands (slow)")
+            
+        for cmd in synced:
+            print(f"  - /{cmd.name}")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
+    
+    # Send test message to confirm bot works
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send("✅ **Skycards Bot Online!** Ready for flight alerts.")
+        print(f"Test message sent to #{channel.name}")
+    else:
+        print(f"Channel ID {CHANNEL_ID} not found!")
+    
+    # Start loops with error handling
+    try:
+        if not abe_watch.is_running():
+            abe_watch.start()
+            print("✅ Airport monitoring started")
+    except Exception as e:
+        print(f"❌ Failed to start airport monitoring: {e}")
+        
+    try:
+        if not rare_hunt.is_running():
+            rare_hunt.start()
+            print("✅ Rare aircraft hunting started")
+    except Exception as e:
+        print(f"❌ Failed to start rare hunting: {e}")
 
 # Slash commands (QoL)
 @tree.command(name="watch", description="Set alert window (minutes)")
@@ -229,6 +379,87 @@ async def _rarity_min(inter: discord.Interaction, value: float):
     global MIN_RARITY
     MIN_RARITY = value
     await inter.response.send_message(f"Minimum rarity set to {value:.2f}.", ephemeral=True)
+
+# Rare Aircraft Search Commands
+@tree.command(name="add_search", description="Add aircraft search term with AI suggestions")
+async def _add_search(inter: discord.Interaction, term: str):
+    try:
+        # Add the main term
+        HUNTER.add_search_term(term)
+        
+        # Send immediate response
+        await inter.response.send_message(f"✅ Added '{term.upper()}' to rare aircraft search. Getting AI suggestions...", ephemeral=False)
+        
+        # Get AI suggestions (this might take a few seconds)
+        suggestions = await HUNTER.get_aircraft_suggestions(term)
+        
+        if suggestions:
+            suggestion_text = ", ".join(suggestions)
+            embed = discord.Embed(
+                title=f"🤖 DeepSeek suggests for '{term.upper()}':",
+                description=suggestion_text,
+                color=0x00FF00
+            )
+            embed.set_footer(text="Use /add_search to add any of these terms individually")
+            
+            # Send as follow-up message
+            await inter.followup.send(embed=embed)
+            
+    except Exception as e:
+        print(f"Error in add_search: {e}")
+        try:
+            await inter.response.send_message(f"❌ Error adding search term: {str(e)}", ephemeral=True)
+        except:
+            await inter.followup.send(f"❌ Error adding search term: {str(e)}", ephemeral=True)
+
+@tree.command(name="remove_search", description="Remove aircraft search term")
+async def _remove_search(inter: discord.Interaction, term: str):
+    try:
+        HUNTER.remove_search_term(term)
+        await inter.response.send_message(f"❌ Removed '{term.upper()}' from search.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in remove_search: {e}")
+        await inter.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+
+@tree.command(name="list_search", description="List all aircraft search terms")
+async def _list_search(inter: discord.Interaction):
+    try:
+        terms = HUNTER.get_search_terms()
+        
+        if terms:
+            term_list = ", ".join(terms)
+            embed = discord.Embed(
+                title="🔍 Current Aircraft Search Terms",
+                description=term_list,
+                color=0x0099FF
+            )
+            embed.set_footer(text=f"Searching for {len(terms)} terms globally")
+            await inter.response.send_message(embed=embed, ephemeral=False)
+        else:
+            await inter.response.send_message("No search terms configured. Use `/add_search` to add some!", ephemeral=True)
+    except Exception as e:
+        print(f"Error in list_search: {e}")
+        await inter.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+
+@tree.command(name="hunt_stats", description="Show rare aircraft hunting statistics")
+async def _hunt_stats(inter: discord.Interaction):
+    terms = HUNTER.get_search_terms()
+    
+    embed = discord.Embed(
+        title="📊 Rare Aircraft Hunter Stats",
+        color=0xFF6B35
+    )
+    embed.add_field(name="Search Terms", value=f"{len(terms)} active", inline=True)
+    embed.add_field(name="Scan Frequency", value="Every 3 minutes", inline=True)
+    embed.add_field(name="Coverage", value="Global", inline=True)
+    embed.add_field(name="Active Hours", value="6 AM - 11 PM", inline=True)
+    embed.add_field(name="Data Source", value="OpenSky Network", inline=True)
+    embed.add_field(name="AI Assistant", value="DeepSeek", inline=True)
+    
+    if terms:
+        embed.add_field(name="Current Searches", value=", ".join(terms[:10]), inline=False)
+        
+    await inter.response.send_message(embed=embed, ephemeral=False)
 
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)

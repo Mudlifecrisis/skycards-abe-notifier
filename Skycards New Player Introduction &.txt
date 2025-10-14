@@ -1,0 +1,194 @@
+Skycards: New Player Introduction & FAQ
+Skycards: New Player Introduction & FAQ
+Welcome to Skycards, the collectible aviation card game by Flightradar24!
+If you’re just starting out, this guide aims to give you a clear overview of how the game works and answer the most common questions new players have. It's not perfect, but this is what I believe you need to know to really get started with the game. If the guide gains traction, I will try to keep this up-to-date as new mechanics roll out and updates are made. I welcome all feedback for edits.
+
+What is Skycards?
+Skycards is a real-time, location-based mobile game where you “catch” various aircraft flying overhead, collect them as cards, and battle other players. Think Pokémon GO meets aviation — but instead of Pokemon, you’re spotting and collecting planes.
+
+I think that the most important thing to know is that the game is what you make of it; set your own goals. If you want to catch every plan, go for it. If you want to be top 10 in your local airport or top of the battle charts, have a blast. There is no pre-designed goal, or agreed upon finish line.
+
+Core Gameplay Mechanics
+Catching Planes
+
+Spot a Plane
+
+Open the app and look at the live flight map, which is powered by Flightradar24
+
+Tap on a plane flying in your local airspace.
+
+Capture It
+
+Use the capture screen to align the aircraft inside the green box. You must capture at least 70% of the plan for it to count as a capture.
+
+An aircraft will zoom past 8 times before the capture session resets. You will get a clear shot if you wait.
+
+TIP: Every time you enter a capture session the clouds are randomized. You can often get a clearer picture quicker than waiting by backing out of the capture session and re-clicking "Catch" on the aircraft. This will reset the clouds as many times as you like so that you can start with a clear area.
+
+The further away an aircraft is from the center of your capture radius the trickier it will be to fully capture it. The green capture box becomes more unstable.
+
+Tap when it turns green to capture max coins.
+
+You get 1 coin for capturing 100% of the aircraft, and/or 1 coin for having no clouds in the capture box
+
+Collect the Card
+
+Each plane you capture becomes a card in your collection.
+
+Catching duplicates levels up your cards (Common → Silver → Gold, anything after 50K XP will remain Gold).
+
+There are also special Glow Cards. These provide no extra benefit beyond being cool to look at, like a shiny Pokemon. If you catch a Glow card, that aircraft + flight combination will Glow for everyone who catches it.
+
+Build Your Deck
+
+Once you reach higher levels, you can battle using 5-card decks. Battles compare categories like wingspan, age, or speed.
+
+You can view
+
+Level Up
+
+Capturing planes and completing missions earns XP, coins, and photos (stamina).
+
+Leveling up unlocks new features, airports, and customization options.
+
+Photos (Stamina System)
+
+You start with 5 photos at a time.
+
+Photos refill over time automatically.
+
+Ways to get more:
+
+Wait for the timer (free reloads). Your 5 photos fully reload 20 minutes after you take your first photo of 5.
+
+Watch ads for 2 bonus photos.
+
+Continuing to watch ads will put the photo counter greater than 5, and generally the ads get shorter the more you watch in a row.
+
+Spend coins (10 coins = 5 photos).
+
+Buy timed boosts (e.g., 75 coins = 30 mins of unlimited photos).
+
+TIP: If you're in a high traffic area you can usually come out net-neutral or more coins than the 75 coin cost.
+
+Airports & Travel
+
+By default, you see planes flying in your local airspace determined by your GPS location. You can unlock other airports by:
+
+Capturing a plane flying to that destination.
+
+Spending coins to expand radar or travel directly.
+
+Radar expansion unlocks at Level 3
+
+Traveling to other airports unlocks at Level 5, and lasts for 30 minutes once you travel
+
+Traveling lets you catch unique aircraft you may not normally seen in your area, and capture additional destinations.
+
+Airport travel costs are determined by how far away it is from you. An airport right outside of your circle may cost as little at 12 coins to travel, one on the other side of the world might be 175+ coins.
+
+TIP: once you travel to an airport, that becomes your location and additional travel cost it determined by its proximity to that airport. This means if you spend a lot of coins to hop across continents, it can be very cheap to stay on that continent and keep moving to different airports.
+
+Some destinations are tricker to catch than others and there are entire Discord groups dedicated to catching a flight to say Monoco, Ukraine, or Antarctica.
+
+Battles, Missions, and Highscores
+
+Battles unlock at Level 8.
+
+You make a 5-card deck from the aircraft you've caught, make a wager, and face off against another player. The match making is done by the number of coins you're wagering, not by level, number of aircraft caught, or any other stat.
+
+There are 5 rounds and each round compares a card stat (e.g., wingspan, aircraft age). The person who wins 3 rounds or more wins the battle and wins the coins in the amount you've wagered.
+
+Daily missions & challenges reward extra coins and photos.
+
+There are 3 missions each day, and they can be viewed by selecting the Profile icon on the bottom of your screen
+
+Highscores
+
+For any aircraft you catch with a named airport destination, the XP from that aircraft will count towards a Highscore table for that airport.
+
+The highscores are on a rolling 7 day basis, and there are no rewards beyond bragging rights for being on the Top 10.
+
+Items
+
+There are three items that you can obtain by either purchasing them with coins or by random drop:
+
+Catch Anywhere - Catch an aircraft anywhere in the world
+
+These are very valuable as it helps you catch those rare aircraft and destinations without having to travel to an airport. If you are far from your GPS destination, the camera will be unstable.
+
+Catch Again - Catch the same aircraft once more
+
+This tends to be useful when you do stumble upon an ultra-rare and you want to increase the card level as quickly as possible.
+
+Camera Stabilizer - Keeps the camera steady for improved framing
+
+This is super helpful in catching aircraft on the edge of your catch radius or for using a Catch Anywhere
+
+Achievements
+
+At the time of writing this, there are 24 achievements. There is a mix that you win through catching all aircraft of a certain rarity. destinations, and battling.
+
+Airpedia
+
+This is a treasure trove of aircraft information for nearly every aircraft imaginable. Including a map of where you are most likely to find that aircraft.
+
+You will find short descriptions of the aircraft, pictures you can rotate (once your captured the aircraft at least once), and stats such as first flight, wingspan, seats, etc.
+
+There is also useful information for setting goals such as the rarity of an aircraft and how many examples exist of that aircraft.
+
+Lastly, your catches are logged at the very bottom under "Unique Aircraft". You will see how many examples of a given aircraft you've captured, the registration, and also details of your capture once you select the registration.
+
+Skycards FAQ
+Q: Does a Glow card provide anything special?
+A: Nope. Nothing beyond a cool glowing edge on the card. You get the same XP, it counts the same in battles, and in general it is just a rare visual quirk.
+
+Q: Do I need to be outside to play?
+A: Nope! Planes are tracked in real time by Flightradar24, so you can capture them from home. Being near a major airport just gives you more variety.
+
+Q: What happens if I catch the same plane multiple times?
+A: Duplicates give XP to that card. Once it hits milestones, it upgrades from Common → Silver → Gold. You can see how many times you've captured a given aircraft by its registration in the Airpedia.
+
+Q: How do I get more coins?
+A: Capturing planes, completing missions, winning battles, and leveling up. Coins are used for photos, airport travel, and boosts. You can also spend real money to buy coins.
+
+Q: Is there a limit to how many cards I can collect?
+A: No hard cap! The more planes you capture, the bigger your Airpedia grows.
+
+Q: What’s the fastest way to progress?
+A: Firstly that depends on how you've defined progress. Find something that interests you and focus on it. A good way to explore as you're learning the game is to focus on:
+
+Capturing accurately framed planes (green box = bonus).
+
+Saving infinite photo boosts for busy airport sessions.
+
+Doing daily missions for steady coin income.
+
+Q: Is this game free-to-play friendly?
+A: Yes. The stamina system slows you down a bit, but you can progress without spending money if you play consistently.
+
+Final Tips for Beginners
+Have fun, seriously. Set your own goals and make the game your own.
+
+Don’t waste photos on planes that are almost out of range — they’re harder to frame.
+
+Use coins strategically: boosts at the right airport > random spending.
+
+Check the in-game Airpedia to see which airports you’ve unlocked.
+
+Chain airport travels and combine them with unlimited photo capture buffs to maximize the benefit. I once got the entire Dragon achievement by traveling to Shanghai for 30 minutes and just capturing every aircraft in the area.
+
+There is something called the "Monaco Method" for capturing a destination on aircraft without a set destination. This is more advanced and I encourage you to look it up to catch locations such as Monaco or Antarctica. It can also be used to climb the scoreboard of your small, local airport.
+
+Join a Discord to find out about glow planes in real time. There is an official one, and many unofficial ones. Find a community that suits your needs.
+
+
+Upvote
+144
+
+Downvote
+
+16
+Go to comments
+
+
