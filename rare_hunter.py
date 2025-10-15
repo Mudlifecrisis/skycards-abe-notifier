@@ -193,10 +193,16 @@ No explanations, just the comma-separated list."""
         
         # Check all search terms against aircraft data
         for term in self.search_terms:
-            if (term in callsign or 
-                term in icao24 or 
-                term in country):
-                return True, term
+            # For ICAO codes (like B35, KC135), only match callsign prefixes
+            # Don't match random ICAO24 hex codes
+            if len(term) <= 6 and term.isalnum():
+                # This is likely an aircraft type code - only match callsign
+                if callsign.startswith(term):
+                    return True, term
+            else:
+                # For longer terms (like STRATOTANKER), check callsign and country
+                if (term in callsign or term in country):
+                    return True, term
                 
         return False, ""
 

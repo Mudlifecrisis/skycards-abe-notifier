@@ -47,6 +47,14 @@ RARITY = RarityLookup()
 SIGNAL = LiveSignal()
 HUNTER = RareAircraftHunter()
 
+# Pennsylvania airports to monitor
+PA_AIRPORTS = {
+    'ABE': 'Allentown',
+    'UKT': 'Quakertown', 
+    'MPO': 'Pocono Mountains',
+    'LNS': 'Lancaster'
+}
+
 AERODATABOX_BASE = "https://aerodatabox.p.rapidapi.com"
 
 async def fetch_arrivals(dst_iata: str) -> list[dict]:
@@ -112,7 +120,7 @@ def priority_for(ac_icao: str | None, rarity_value: float | None) -> int:
         return 2
     return 3
 
-async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: float | None, prio: int):
+async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: float | None, prio: int, dest_airport: str = "ABE"):
     airline = (flight.get("airline") or {}).get("name") or "Unknown Airline"
     f = flight.get("flight") or {}
     fnum = f.get("iata") or f.get("number") or "Unknown"
@@ -140,7 +148,7 @@ async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: f
     elif ac_icao in SIGNAL.rare_types or (rarity_value or 0) >= 5.0:
         tag = "🟣 RARE"
 
-    title = f"{tag} {airline} {fnum} → {arr}".strip()
+    title = f"{tag} {airline} {fnum} → {dest_airport}".strip()
     embed = discord.Embed(
         title=title,
         description=f"From **{dep}** | ETA ~ **{mins:.0f} min**"
@@ -158,7 +166,7 @@ async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: f
     await channel.send(content=mention, embed=embed)
 
 @tasks.loop(seconds=120)
-async def abe_watch():
+async def pa_airports_watch():
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
@@ -168,81 +176,64 @@ async def abe_watch():
     if in_quiet_hours(local_hour):
         return
 
-    try:
-        flights = await fetch_arrivals(DST_IATA)
-    except Exception:
-        return
-
-    enriched: list[tuple[int, float | None, dict]] = []
-    for fl in flights:
-        ok, eta_iso, mins = should_alert_window(fl, DST_IATA, WIN_MIN, WIN_MAX)
-        if not ok:
-            continue
-        ac = fl.get("aircraft") or {}
-        ac_icao = (ac.get("icao") or "").upper()
-        ac_iata = (ac.get("iata") or "").upper()
-        rscore = RARITY.get(ac_icao, ac_iata)
-
-        if rscore is not None and rscore < MIN_RARITY:
-            continue
-
-        prio = priority_for(ac_icao, rscore)
-        enriched.append((prio, rscore, fl))
-
-    enriched.sort(key=lambda t: t[0])
-    for prio, rscore, fl in enriched:
+    # Monitor all PA airports
+    for airport_code, airport_name in PA_AIRPORTS.items():
         try:
-            await post_alert(channel, fl, rscore, prio)
-            await asyncio.sleep(0.5)
-        except Exception:
-            pass
+            flights = await fetch_arrivals(airport_code)
+            
+            enriched: list[tuple[int, float | None, dict, str]] = []
+            for fl in flights:
+                ok, eta_iso, mins = should_alert_window(fl, airport_code, WIN_MIN, WIN_MAX)
+                if not ok:
+                    continue
+                ac = fl.get("aircraft") or {}
+                ac_icao = (ac.get("icao") or "").upper()
+                ac_iata = (ac.get("iata") or "").upper()
+                rscore = RARITY.get(ac_icao, ac_iata)
+
+                if rscore is not None and rscore < MIN_RARITY:
+                    continue
+
+                prio = priority_for(ac_icao, rscore)
+                enriched.append((prio, rscore, fl, airport_name))
+
+            enriched.sort(key=lambda t: t[0])
+            for prio, rscore, fl, dest_airport in enriched:
+                try:
+                    await post_alert(channel, fl, rscore, prio, dest_airport)
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"Error posting alert for {dest_airport}: {e}")
+                    
+        except Exception as e:
+            print(f"Error monitoring {airport_name} ({airport_code}): {e}")
+            continue
 
 async def post_rare_alert(channel: discord.TextChannel, aircraft: dict):
-    """Post rare aircraft alert to Discord"""
+    """Post condensed rare aircraft alert to Discord"""
     callsign = aircraft.get('callsign', 'Unknown')
-    country = aircraft.get('origin_country', 'Unknown')
     matched_term = aircraft.get('matched_term', '')
     
-    # Format location
-    lat = aircraft.get('latitude', 0)
-    lon = aircraft.get('longitude', 0)
+    # Format altitude and speed compactly
+    altitude = aircraft.get('altitude_ft', 0)
+    speed = aircraft.get('velocity_kts', 0)
     
-    # Format altitude and speed
-    alt_text = ""
-    if aircraft.get('altitude_ft'):
-        alt_text = f"{aircraft['altitude_ft']:,} ft"
-        
-    speed_text = ""
-    if aircraft.get('velocity_kts'):
-        speed_text = f"{aircraft['velocity_kts']} kts"
+    alt_text = f"{altitude//1000}K ft" if altitude > 0 else "?? ft"
+    speed_text = f"{speed}kts" if speed > 0 else "??kts"
     
-    title = f"🎯 **RARE AIRCRAFT FOUND** - {matched_term}"
+    # Create tracking link - use proper FlightRadar24 format
+    track_link = "N/A"
+    if callsign and callsign != 'Unknown':
+        # FlightRadar24 direct flight URL format
+        fr24_url = f"https://www.flightradar24.com/{callsign}"
+        flightaware_url = f"https://flightaware.com/live/flight/{callsign}"
+        track_link = f"[FR24]({fr24_url})|[FA]({flightaware_url})"
     
-    embed = discord.Embed(
-        title=title,
-        description=f"**{callsign}** from {country}",
-        color=0xFF6B35  # Orange color for rare alerts
-    )
+    # Single line format: 🎯 RCH817 (Military) - 17K ft, 318kts - [Track](link) - 5min ago
+    alert_text = f"🎯 **{callsign}** ({matched_term}) - {alt_text}, {speed_text} - {track_link} - <t:{int(datetime.now().timestamp())}:R>"
     
-    if lat and lon:
-        embed.add_field(name="Location", value=f"{lat:.4f}, {lon:.4f}", inline=True)
-        # Add Google Maps link
-        maps_url = f"https://maps.google.com/?q={lat},{lon}"
-        embed.add_field(name="Maps Link", value=f"[View on Map]({maps_url})", inline=True)
-    
-    if alt_text:
-        embed.add_field(name="Altitude", value=alt_text, inline=True)
-        
-    if speed_text:
-        embed.add_field(name="Speed", value=speed_text, inline=True)
-        
-    embed.add_field(name="ICAO24", value=aircraft.get('icao24', 'Unknown'), inline=True)
-    embed.add_field(name="Detected", value=f"<t:{int(datetime.now().timestamp())}:R>", inline=True)
-    
-    # Add Skycards context
-    embed.set_footer(text="💡 Use 'Catch Anywhere' item in Skycards to catch this aircraft!")
-    
-    await channel.send(embed=embed)
+    # Suppress embeds to prevent link previews
+    await channel.send(alert_text, suppress_embeds=True)
 
 @tasks.loop(seconds=180)  # Check every 3 minutes
 async def rare_hunt():
@@ -354,9 +345,9 @@ async def on_ready():
     
     # Start loops with error handling
     try:
-        if not abe_watch.is_running():
-            abe_watch.start()
-            print("✅ Airport monitoring started")
+        if not pa_airports_watch.is_running():
+            pa_airports_watch.start()
+            print("PA Airport monitoring started")
     except Exception as e:
         print(f"❌ Failed to start airport monitoring: {e}")
         
