@@ -129,10 +129,33 @@ RCH808 (matched: RCH) - 33,000ft, 499kts
 3. **Test dual-source approach** - ADSBExchange + OpenSky
 4. **Improve search UX** - allow "globemaster" searches
 
-## 📝 **Notes for Tomorrow**
+## 🚨 **MAJOR UPDATE - October 16, 2025**
 
-- All code fixes from tonight are working
-- Authentication issues resolved
-- Need to decide on complexity vs. benefit for solutions
-- Consider starting with simple aircraft database approach
-- Document user feedback on missing aircraft
+### **Core Problem Identified Through User Testing**
+
+**Discovery**: User searched "C17" on OpenSky website → 578 results, 99% false matches
+**Root Cause**: Substring text matching instead of structured aircraft type filtering
+
+### **Technical Evidence**
+- OpenSky API provides ICAO24 and callsign but **NO aircraft type information**
+- Current system matches "GLOBEMASTER" against callsign "RCH4231" → no match
+- Missing database: ICAO24 → aircraft type mapping
+
+### **Professional Solution Identified**
+- **AeroDataBox API**: $19/month for complete aircraft database
+- **Structured search**: "globemaster" → "C17" → filter by aircraft type
+- **Expected result**: Find ALL C-17s globally, zero false positives
+
+### **Implementation Status**
+- ✅ Problem fully understood and documented
+- ✅ Professional solution researched (AeroDataBox)
+- ✅ Architecture designed for structured search
+- 🚧 Ready for implementation when project resumes
+
+## 📝 **Notes for Project Resume**
+
+- All code fixes from previous session are working
+- Authentication issues resolved  
+- **NEW**: Core search logic breakthrough achieved
+- **PRIORITY**: Implement AeroDataBox integration for aircraft identification
+- **OUTCOME**: Professional-grade aircraft tracking system

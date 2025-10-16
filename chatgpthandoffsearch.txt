@@ -1,0 +1,186 @@
+Absolutely — here’s a **ready-to-hand-off technical document** you can drop into your AI / CLI / LLM project folder (as `aircraft_search_logic.md` or similar).
+It clearly explains **what ICAO24 is**, **how to properly search aircraft by model**, and **how your system should behave** — no prior aviation knowledge required.
+
+---
+
+# ✈️ Aircraft Search System Overview
+
+### Purpose
+
+This document describes how to build a reliable aircraft search function for **rare plane tracking**, using structured aviation data (e.g., OpenSky, ADS-B Exchange, AeroDataBox).
+The key point: **never use text-based substring search** — always match against structured fields (`icao_type`).
+
+---
+
+## 1. Terminology
+
+| Term                     | Meaning                                                                                 | Example                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **ICAO24**               | A 24-bit **unique aircraft identifier** (like a car’s VIN). Each plane has exactly one. | `780C17`                                                                                         |
+| **ICAO Type Designator** | A 4-character **aircraft model code** that identifies what kind of plane it is.         | `C17` = C-17 Globemaster III<br>`AB18` = Aero Boero AB-180<br>`C135` = Boeing C-135 Stratolifter |
+| **Registration**         | The aircraft’s tail number or call sign used for identification.                        | `N123AB`, `G-ABCD`, `LV-ZXY`                                                                     |
+| **Callsign**             | Temporary flight label seen on radar or tracking sites.                                 | `RCH653`, `DAL123`, `AAL44`                                                                      |
+
+---
+
+## 2. Problem Summary
+
+### ❌ What doesn’t work
+
+OpenSky’s **map search box** and other public trackers use **substring text search** — this means searching for “C17” will also show:
+
+* Planes like “C172 Skyhawk” (since they *contain* “C17”)
+* Planes with a hex ID ending in “c17”
+* Callsigns or tail numbers that include those characters
+
+This creates false matches and noise.
+
+---
+
+## 3. The Correct Approach (Structured Search)
+
+Instead of searching text, the bot or AI should filter structured data.
+
+### ✅ Correct logic flow
+
+1. **Translate human input** into official **ICAO type codes**
+
+   * Example: “Globemaster” → `C17`
+   * “Aero Boero AB-180” → `AB18`
+   * “Evektor Cobra” → `VUT1`
+   * “Travel Air 5” → `AA5` (or `TVLB` for early models)
+   * “Boeing C-135 Stratolifter” → `C135`
+
+2. **Fetch live aircraft states** from OpenSky or ADS-B Exchange
+   Each state record includes `icao24`, `callsign`, `lat`, `lon`, etc.
+
+3. **Resolve aircraft metadata**
+
+   * For each `icao24` not in the cache, call an aircraft database API (e.g. OpenSky aircraft DB, AeroDataBox)
+   * Retrieve and store:
+
+     ```json
+     {
+       "icao24": "a4b2f3",
+       "registration": "LV-ZXY",
+       "manufacturer": "Aero Boero",
+       "model": "AB-180",
+       "icao_type": "AB18"
+     }
+     ```
+
+4. **Filter by exact equality**
+
+   * Keep only aircraft where `icao_type` **equals** the translated type code (e.g., `== "AB18"`).
+   * Do **not** use substring or fuzzy matching on the raw text.
+
+5. **Return filtered live aircraft**
+
+   * Show only aircraft that actually match that type, optionally with position, altitude, and source (OpenSky / ADSBX).
+
+---
+
+## 4. Example Queries
+
+| User Input                  | Translate To                      | System Filters For            |
+| --------------------------- | --------------------------------- | ----------------------------- |
+| “Globemaster”               | `C17`                             | `icao_type == "C17"`          |
+| “Aero Boero AB-180”         | `AB18`                            | `icao_type == "AB18"`         |
+| “Evektor Cobra”             | `VUT1`                            | `icao_type == "VUT1"`         |
+| “Travel Air 5”              | `AA5` (modern) / `TVL4` (classic) | `icao_type IN {"AA5","TVL4"}` |
+| “Boeing C-135 Stratolifter” | `C135`                            | `icao_type == "C135"`         |
+
+---
+
+## 5. Data Example
+
+### Raw OpenSky state:
+
+```json
+{
+  "icao24": "a4b2f3",
+  "callsign": "FAB123",
+  "lat": -34.8,
+  "lon": -58.4,
+  "altitude": 4500
+}
+```
+
+### Resolved metadata (cached):
+
+```json
+{
+  "icao24": "a4b2f3",
+  "registration": "LV-ZXY",
+  "manufacturer": "Aero Boero",
+  "model": "AB-180",
+  "icao_type": "AB18"
+}
+```
+
+### Combined and filtered output:
+
+```json
+{
+  "icao24": "a4b2f3",
+  "registration": "LV-ZXY",
+  "type": "AB18",
+  "manufacturer": "Aero Boero",
+  "model": "AB-180",
+  "lat": -34.8,
+  "lon": -58.4,
+  "altitude": 4500,
+  "source": "OpenSky"
+}
+```
+
+Only aircraft with `icao_type == "AB18"` are shown.
+
+---
+
+## 6. Key Design Principles
+
+* **Exact match, not substring:** compare type codes directly (`==`, not `contains`).
+* **Cache on sight:** only resolve new ICAO24s once.
+* **Merge sources:** combine OpenSky + ADS-B Exchange by matching `icao24`.
+* **Translate aliases:** maintain a small dictionary of human names → type codes.
+* **Watchlists:** optionally store specific types or registrations to alert on.
+
+---
+
+## 7. Example Alias Dictionary
+
+```json
+{
+  "globemaster": ["C17"],
+  "aero boero ab-180": ["AB18"],
+  "evektor cobra": ["VUT1"],
+  "travel air 5": ["AA5", "TVLB", "TVL4"],
+  "boeing c-135 stratolifter": ["C135"],
+  "hercules": ["C130", "C130J"],
+  "jumbo": ["B741", "B742", "B743", "B744", "B748"]
+}
+```
+
+---
+
+## 8. Expected Behavior
+
+✅ “Find me all Aero Boero AB-180”
+→ Returns only live `icao_type == "AB18"` aircraft.
+❌ Does *not* include “FAB1800” or any plane whose hex includes “ab18”.
+
+✅ “Find C-17 Globemaster near KABE”
+→ Returns real C-17s; no C172 Skyhawks, no random hex matches.
+
+---
+
+## 9. Implementation Notes
+
+* Use an **equality filter** (`icao_type == code`), not a substring search.
+* Implement caching for `icao24` lookups to avoid API overuse.
+* Optional: persist watchlists for rare hunting (e.g., alert when `C135` enters a region).
+
+---
+
+Would you like me to generate a **versioned JSON schema** for this (something you can import directly into your CLI’s code or documentation folder)? It would describe the expected structure for `state`, `aircraft`, and `alias` objects in your bot.
