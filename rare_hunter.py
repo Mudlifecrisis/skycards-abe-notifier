@@ -38,9 +38,9 @@ class RareAircraftHunter:
         # Aircraft cache to avoid duplicate alerts
         self.seen_aircraft = {}
         
-        # Quiet hours
-        self.quiet_start = 23  # 11 PM
-        self.quiet_end = 6     # 6 AM
+        # Quiet hours (use environment variables, fallback to 23-6)
+        self.quiet_start = int(os.getenv("QUIET_START", "23"))
+        self.quiet_end = int(os.getenv("QUIET_END", "6"))
         
     def load_search_terms(self):
         """Load saved search terms from file"""
@@ -133,18 +133,27 @@ No explanations, just the comma-separated list."""
     async def fetch_global_aircraft(self) -> List[Dict]:
         """Fetch all current aircraft positions from OpenSky Network"""
         try:
-            # Use authentication if available
-            auth = None
+            # Try with authentication first
             if self.opensky_user and self.opensky_pass:
                 auth = aiohttp.BasicAuth(self.opensky_user, self.opensky_pass)
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(self.opensky_base, auth=auth, timeout=30) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return self._parse_opensky_data(data)
+                        elif response.status == 401:
+                            print("OpenSky authentication failed, trying anonymous access...")
+                        else:
+                            print(f"OpenSky API error with auth: {response.status}")
             
+            # Fall back to anonymous access
             async with aiohttp.ClientSession() as session:
-                async with session.get(self.opensky_base, auth=auth, timeout=30) as response:
+                async with session.get(self.opensky_base, timeout=30) as response:
                     if response.status == 200:
                         data = await response.json()
                         return self._parse_opensky_data(data)
                     else:
-                        print(f"OpenSky API error: {response.status}")
+                        print(f"OpenSky API error (anonymous): {response.status}")
                         return []
         except Exception as e:
             print(f"OpenSky API error: {e}")

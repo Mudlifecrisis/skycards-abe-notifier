@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 class UserAirportManager:
     def __init__(self, config_file: str = "user_airports.json"):
         self.config_file = config_file
-        self.max_airports_per_user = 5
-        self.max_total_airports = 15
+        self.max_airports_per_user = 3  # Optimized for API limits (3 users × 3 airports = 9 total)
+        self.max_total_airports = 9     # Stay under OpenSky 4,000 daily limit
         
         # Channel mapping
         self.user_channels = {
@@ -59,7 +59,7 @@ class UserAirportManager:
                     
                 # Ensure all users exist with defaults
                 default_config = {
-                    'gabe': ['ABE', 'UKT', 'MPO', 'LNS'],  # Your current PA airports
+                    'gabe': ['ABE', 'UKT', 'MPO'],  # Reduced to 3 airports max
                     'mike': [],
                     'alex': []
                 }
@@ -74,7 +74,7 @@ class UserAirportManager:
                 
         # Default configuration
         return {
-            'gabe': ['ABE', 'UKT', 'MPO', 'LNS'],
+            'gabe': ['ABE', 'UKT', 'MPO'],  # Reduced to 3 airports max
             'mike': [],
             'alex': []
         }

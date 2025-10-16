@@ -16,6 +16,7 @@ from rare_hunter import RareAircraftHunter
 from mission_finder import MissionFinder, parse_mission_command
 from user_airports import UserAirportManager
 from airport_llm import AirportLLMAssistant
+from alert_tracker import AlertTracker
 
 load_dotenv()
 
@@ -51,6 +52,7 @@ SIGNAL = LiveSignal()
 HUNTER = RareAircraftHunter()
 MISSION_FINDER = MissionFinder()
 AIRPORT_MANAGER = UserAirportManager()
+ALERT_TRACKER = AlertTracker()
 AIRPORT_LLM = AirportLLMAssistant()
 
 # Multi-user airport management (replaces old PA_AIRPORTS)
@@ -121,7 +123,7 @@ def priority_for(ac_icao: str | None, rarity_value: float | None) -> int:
         return 2
     return 3
 
-async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: float | None, prio: int, dest_airport: str = "ABE"):
+async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: float | None, prio: int, dest_airport: str = "ABE", username: str = None):
     airline = (flight.get("airline") or {}).get("name") or "Unknown Airline"
     f = flight.get("flight") or {}
     fnum = f.get("iata") or f.get("number") or "Unknown"
@@ -164,9 +166,34 @@ async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: f
     if eta_iso:
         embed.add_field(name="ETA (ISO)", value=eta_iso, inline=False)
 
-    await channel.send(content=mention, embed=embed)
+    # Track alert for reminders
+    aircraft_data = {
+        'callsign': fnum,
+        'icao24': flight.get('icao24', 'unknown'),
+        'registration': reg,
+        'aircraft_type': ac_icao or ac_iata,
+        'airline': airline,
+        'departure': dep,
+        'arrival': arr,
+        'eta': eta_iso,
+        'rarity': rarity_value,
+        'tag': tag
+    }
+    
+    alert_id = ALERT_TRACKER.create_alert_id(aircraft_data)
+    
+    # Add alert ID to embed footer for acknowledgment tracking
+    embed.set_footer(text=f"React with ✅ to acknowledge • Alert ID: {alert_id[:8]}")
+    
+    # Send alert and add reaction for acknowledgment
+    message = await channel.send(content=mention, embed=embed)
+    await message.add_reaction("✅")
+    
+    ALERT_TRACKER.add_alert(alert_id, aircraft_data, channel.id, username)
+    
+    return message
 
-@tasks.loop(seconds=120)
+@tasks.loop(seconds=300)  # 5 minutes - optimized for API limits
 async def multi_user_airports_watch():
     await bot.wait_until_ready()
     
@@ -216,7 +243,7 @@ async def multi_user_airports_watch():
                 enriched.sort(key=lambda t: t[0])
                 for prio, rscore, fl, dest_airport in enriched:
                     try:
-                        await post_alert(channel, fl, rscore, prio, dest_airport)
+                        await post_alert(channel, fl, rscore, prio, dest_airport, username)
                         await asyncio.sleep(0.5)
                     except Exception as e:
                         print(f"Error posting alert for {username}/{dest_airport}: {e}")
@@ -224,6 +251,44 @@ async def multi_user_airports_watch():
             except Exception as e:
                 print(f"Error monitoring {airport_code} for {username}: {e}")
                 continue
+
+@tasks.loop(minutes=5)  # Check for reminder alerts every 5 minutes
+async def alert_reminder_loop():
+    """Check for alerts that need reminders and send them"""
+    await bot.wait_until_ready()
+    
+    try:
+        # Clean up old alerts first (older than 6 hours)
+        ALERT_TRACKER.cleanup_old_alerts(max_age_hours=6)
+        
+        # Get alerts that need reminders
+        reminders_needed = ALERT_TRACKER.get_alerts_needing_reminder()
+        
+        for alert_id, alert_info in reminders_needed:
+            try:
+                channel = bot.get_channel(alert_info['channel_id'])
+                if not channel:
+                    print(f"Channel {alert_info['channel_id']} not found for reminder {alert_id}")
+                    continue
+                
+                # Create reminder embed
+                embed_data = ALERT_TRACKER.create_reminder_embed(alert_id, alert_info)
+                embed = discord.Embed(**embed_data)
+                
+                # Send reminder
+                message = await channel.send(embed=embed)
+                await message.add_reaction("✅")
+                
+                # Mark as reminded
+                ALERT_TRACKER.mark_reminded(alert_id)
+                
+                print(f"Sent reminder for alert {alert_id[:8]} to {alert_info.get('user', 'unknown')}")
+                
+            except Exception as e:
+                print(f"Error sending reminder for {alert_id}: {e}")
+                
+    except Exception as e:
+        print(f"Error in alert reminder loop: {e}")
 
 async def post_rare_alert(channel: discord.TextChannel, aircraft: dict):
     """Post condensed rare aircraft alert to Discord"""
@@ -288,8 +353,99 @@ async def on_message(msg: discord.Message):
     
     print(f"Processing user message: {msg.content}")
     
+    # Help command - show all available commands
+    if msg.content == "!":
+        help_text = """🤖 **Skycards Bot Commands**
+
+**🔍 Mission Search:**
+• `!find speed >400 ABE` - Find flights >400kts near ABE
+• `!find altitude >35000 PHL` - Find high-altitude flights
+• `!find manufacturer boeing JFK` - Find Boeing aircraft
+• `!find route transpacific LAX` - Find transpacific routes
+
+**✈️ Rare Aircraft Hunting:**
+• `!add chinook` - Add search term (with AI suggestions)
+• `!list` - Show current search terms
+• `!stats` - Show hunting statistics
+• `!hunt` - Force search for rare aircraft now
+• `!alerts` - Show alert acknowledgment status
+
+**🏢 Airport Management:**
+• `!airports list` - Show your monitored airports
+• `!airports add PHL` - Add airport to your list (max 3)
+• `!airports remove LAX` - Remove airport from list
+• `!airports clear` - Clear all your airports
+
+**🤖 Airport Assistant:**
+• `!airports_llm find dubai airport` - Ask AI about airports
+• `!airports_llm best cargo hub europe` - Natural language queries
+
+**⚙️ System:**
+• `!` - Show this help menu
+• React with ✅ to acknowledge aircraft alerts
+
+**💡 Tips:**
+• Aircraft alerts auto-remind after 30 minutes if not acknowledged
+• Max 3 airports per user, 5-minute monitoring intervals
+• Active hours: 6am-midnight, quiet: midnight-6am"""
+
+        await msg.reply(help_text)
+        return
+    
+    # Mission search command
+    if msg.content.startswith("!find "):
+        print("Mission search command received...")
+        query_text = msg.content[6:].strip()  # Remove "!find "
+        
+        if not query_text:
+            await msg.reply("❌ **Mission Search Usage:**\n" +
+                          "• `!find speed >400 ABE` - Find flights >400kts near ABE\n" +
+                          "• `!find altitude >35000 PHL` - Find high-altitude flights\n" +
+                          "• `!find manufacturer boeing JFK` - Find Boeing aircraft\n" +
+                          "• `!find route transpacific LAX` - Find transpacific routes")
+            return
+        
+        try:
+            # Parse the mission search command
+            criteria, airport_code = parse_mission_command(query_text)
+            if not criteria or not airport_code:
+                await msg.reply("❌ Invalid format. Use: `!find [criteria] [airport]`\nExample: `!find speed >400 ABE`")
+                return
+            
+            await msg.reply(f"🔍 **Searching for {query_text}...**")
+            
+            # Execute the search
+            results = await MISSION_FINDER.find_flights_by_criteria(airport_code, criteria)
+            
+            if not results:
+                await msg.reply(f"❌ No flights found matching: **{query_text}**")
+                return
+            
+            # Format results
+            result_text = f"✅ **Found {len(results)} flights matching:** {query_text}\n\n"
+            for i, flight in enumerate(results[:5], 1):  # Limit to 5 results
+                callsign = flight.get('callsign', 'Unknown')
+                altitude = flight.get('altitude_ft', 0)
+                speed = flight.get('velocity_kts', 0)
+                distance = flight.get('distance_km', 0)
+                
+                alt_text = f"{altitude//1000}K ft" if altitude > 0 else "??"
+                speed_text = f"{speed}kts" if speed > 0 else "??"
+                dist_text = f"{distance:.0f}km" if distance > 0 else "??"
+                
+                result_text += f"**{i}.** {callsign} | {alt_text} | {speed_text} | {dist_text} away\n"
+            
+            if len(results) > 5:
+                result_text += f"\n*...and {len(results)-5} more flights*"
+            
+            await msg.reply(result_text, suppress_embeds=True)
+            
+        except Exception as e:
+            print(f"Mission search error: {e}")
+            await msg.reply(f"❌ Error searching: {str(e)}")
+            
     # Simple text commands for testing
-    if msg.content.startswith("!add "):
+    elif msg.content.startswith("!add "):
         print("Adding search term...")
         term = msg.content[5:].strip()
         HUNTER.add_search_term(term)
@@ -307,6 +463,15 @@ async def on_message(msg: discord.Message):
         print("Showing stats...")
         terms = HUNTER.get_search_terms()
         await msg.reply(f"📊 **Rare Hunter Stats**\n• {len(terms)} search terms active\n• Scanning every 3 minutes globally\n• Airport monitoring: ABE")
+    
+    elif msg.content == "!alerts":
+        print("Showing alert status...")
+        status = ALERT_TRACKER.get_alert_status()
+        await msg.reply(f"🔔 **Alert Status**\n" + 
+                       f"• Total alerts: {status['total']}\n" +
+                       f"• Acknowledged: {status['acknowledged']}\n" +
+                       f"• Reminded: {status['reminded']}\n" +
+                       f"• Pending: {status['pending']}")
         
     elif msg.content == "!hunt" or msg.content == "!force" or msg.content == "!search":
         print("Force hunting for rare aircraft...")
@@ -477,6 +642,35 @@ async def on_message(msg: discord.Message):
             await msg.reply(f"❌ Error querying airport assistant: {str(e)}")
 
 @bot.event
+async def on_reaction_add(reaction, user):
+    """Handle alert acknowledgment reactions"""
+    if user.bot:
+        return
+    
+    # Check if this is an acknowledgment reaction (✅) on an alert message
+    if str(reaction.emoji) == "✅":
+        try:
+            # Try to find this alert in our tracker by looking at message embeds
+            message = reaction.message
+            if message.embeds:
+                embed = message.embeds[0]
+                
+                # Look for alert ID in footer or check if it's a reminder
+                footer_text = embed.footer.text if embed.footer else ""
+                if "Alert ID:" in footer_text:
+                    # Extract alert ID from footer
+                    alert_id_part = footer_text.split("Alert ID:")[-1].strip()
+                    
+                    # Find matching alert (search by partial ID)
+                    for full_alert_id in ALERT_TRACKER.pending_alerts.keys():
+                        if full_alert_id.startswith(alert_id_part):
+                            ALERT_TRACKER.acknowledge_alert(full_alert_id)
+                            print(f"Alert {full_alert_id[:8]} acknowledged by {user.name}")
+                            break
+        except Exception as e:
+            print(f"Error handling reaction acknowledgment: {e}")
+
+@bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (id: {bot.user.id})")
     try:
@@ -518,6 +712,13 @@ async def on_ready():
             print("✅ Rare aircraft hunting started")
     except Exception as e:
         print(f"❌ Failed to start rare hunting: {e}")
+        
+    try:
+        if not alert_reminder_loop.is_running():
+            alert_reminder_loop.start()
+            print("✅ Alert reminder system started")
+    except Exception as e:
+        print(f"❌ Failed to start alert reminders: {e}")
 
 # Slash commands (QoL)
 @tree.command(name="watch", description="Set alert window (minutes)")
