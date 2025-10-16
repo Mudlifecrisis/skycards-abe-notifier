@@ -13,6 +13,9 @@ from alert_window import should_alert_window, pick_eta, minutes_until
 from rarity import RarityLookup, rarity_tier
 from alerts_sources import LiveSignal
 from rare_hunter import RareAircraftHunter
+from mission_finder import MissionFinder, parse_mission_command
+from user_airports import UserAirportManager
+from airport_llm import AirportLLMAssistant
 
 load_dotenv()
 
@@ -46,14 +49,12 @@ tree = discord.app_commands.CommandTree(bot)
 RARITY = RarityLookup()
 SIGNAL = LiveSignal()
 HUNTER = RareAircraftHunter()
+MISSION_FINDER = MissionFinder()
+AIRPORT_MANAGER = UserAirportManager()
+AIRPORT_LLM = AirportLLMAssistant()
 
-# Pennsylvania airports to monitor
-PA_AIRPORTS = {
-    'ABE': 'Allentown',
-    'UKT': 'Quakertown', 
-    'MPO': 'Pocono Mountains',
-    'LNS': 'Lancaster'
-}
+# Multi-user airport management (replaces old PA_AIRPORTS)
+# Now handled by AIRPORT_MANAGER
 
 AERODATABOX_BASE = "https://aerodatabox.p.rapidapi.com"
 
@@ -166,48 +167,63 @@ async def post_alert(channel: discord.TextChannel, flight: dict, rarity_value: f
     await channel.send(content=mention, embed=embed)
 
 @tasks.loop(seconds=120)
-async def pa_airports_watch():
+async def multi_user_airports_watch():
     await bot.wait_until_ready()
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel:
-        return
-
+    
     local_hour = datetime.now().hour
     if in_quiet_hours(local_hour):
         return
 
-    # Monitor all PA airports
-    for airport_code, airport_name in PA_AIRPORTS.items():
-        try:
-            flights = await fetch_arrivals(airport_code)
-            
-            enriched: list[tuple[int, float | None, dict, str]] = []
-            for fl in flights:
-                ok, eta_iso, mins = should_alert_window(fl, airport_code, WIN_MIN, WIN_MAX)
-                if not ok:
-                    continue
-                ac = fl.get("aircraft") or {}
-                ac_icao = (ac.get("icao") or "").upper()
-                ac_iata = (ac.get("iata") or "").upper()
-                rscore = RARITY.get(ac_icao, ac_iata)
-
-                if rscore is not None and rscore < MIN_RARITY:
-                    continue
-
-                prio = priority_for(ac_icao, rscore)
-                enriched.append((prio, rscore, fl, airport_name))
-
-            enriched.sort(key=lambda t: t[0])
-            for prio, rscore, fl, dest_airport in enriched:
-                try:
-                    await post_alert(channel, fl, rscore, prio, dest_airport)
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    print(f"Error posting alert for {dest_airport}: {e}")
-                    
-        except Exception as e:
-            print(f"Error monitoring {airport_name} ({airport_code}): {e}")
+    # Monitor all user airports
+    all_user_airports = AIRPORT_MANAGER.get_all_airports()
+    
+    for username, airport_codes in all_user_airports.items():
+        if not airport_codes:  # Skip users with no airports
             continue
+            
+        # Get user's channel
+        user_channel_id = AIRPORT_MANAGER.get_channel_for_user(username)
+        if not user_channel_id:
+            print(f"No channel found for user {username}")
+            continue
+            
+        channel = bot.get_channel(user_channel_id)
+        if not channel:
+            print(f"Channel {user_channel_id} not found for user {username}")
+            continue
+        
+        # Monitor each airport for this user
+        for airport_code in airport_codes:
+            try:
+                flights = await fetch_arrivals(airport_code)
+                
+                enriched: list[tuple[int, float | None, dict, str]] = []
+                for fl in flights:
+                    ok, eta_iso, mins = should_alert_window(fl, airport_code, WIN_MIN, WIN_MAX)
+                    if not ok:
+                        continue
+                    ac = fl.get("aircraft") or {}
+                    ac_icao = (ac.get("icao") or "").upper()
+                    ac_iata = (ac.get("iata") or "").upper()
+                    rscore = RARITY.get(ac_icao, ac_iata)
+
+                    if rscore is not None and rscore < MIN_RARITY:
+                        continue
+
+                    prio = priority_for(ac_icao, rscore)
+                    enriched.append((prio, rscore, fl, airport_code))
+
+                enriched.sort(key=lambda t: t[0])
+                for prio, rscore, fl, dest_airport in enriched:
+                    try:
+                        await post_alert(channel, fl, rscore, prio, dest_airport)
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        print(f"Error posting alert for {username}/{dest_airport}: {e}")
+                        
+            except Exception as e:
+                print(f"Error monitoring {airport_code} for {username}: {e}")
+                continue
 
 async def post_rare_alert(channel: discord.TextChannel, aircraft: dict):
     """Post condensed rare aircraft alert to Discord"""
@@ -314,6 +330,151 @@ async def on_message(msg: discord.Message):
         except Exception as e:
             print(f"Force hunt error: {e}")
             await msg.reply(f"❌ Error during force search: {str(e)}")
+            
+    elif msg.content.startswith("!find "):
+        print("Mission search command received...")
+        try:
+            criteria_type, criteria, airport_code = parse_mission_command(msg.content)
+            
+            if not criteria or not airport_code:
+                await msg.reply("❌ **Invalid search format!**\n" +
+                              "Examples:\n" +
+                              "• `!find speed >400 ABE` - Flights over 400kts near ABE\n" +
+                              "• `!find altitude >35000 PHL` - Flights above 35K ft near PHL\n" +
+                              "• `!find transpacific JFK` - Transpacific flights near JFK\n" +
+                              "• `!find manufacturer bombardier LAX` - Bombardier aircraft near LAX")
+                return
+                
+            # Check if airport is valid
+            if not MISSION_FINDER.get_airport_coordinates(airport_code):
+                await msg.reply(f"❌ Airport **{airport_code}** not found in database.")
+                return
+                
+            await msg.reply(f"🔍 **Searching for {criteria_type} flights near {airport_code}...**")
+            
+            # Perform the search
+            flights = await MISSION_FINDER.find_flights_by_criteria(airport_code, criteria)
+            
+            if flights:
+                # Format results
+                result_lines = [f"🎯 **Found {len(flights)} flights matching criteria near {airport_code}:**"]
+                
+                for flight in flights:
+                    callsign = flight['callsign']
+                    distance = flight['distance_from_target']
+                    
+                    # Include relevant stats based on search type
+                    stats = []
+                    if 'min_speed' in criteria or 'max_speed' in criteria:
+                        stats.append(f"{flight['velocity_kts']}kts")
+                    if 'min_altitude' in criteria or 'max_altitude' in criteria:
+                        stats.append(f"{flight['altitude_ft']//1000}K ft")
+                    if 'route_type' in criteria:
+                        stats.append(f"{flight['origin_country']}")
+                        
+                    stats_text = ", ".join(stats) if stats else ""
+                    fr24_url = f"https://www.flightradar24.com/{callsign}"
+                    
+                    result_lines.append(f"• **{callsign}** - {stats_text} - {distance}km away - [Track]({fr24_url})")
+                
+                # Send results (suppress embeds to avoid previews)
+                result_text = "\n".join(result_lines)
+                await msg.reply(result_text, suppress_embeds=True)
+                
+            else:
+                await msg.reply(f"❌ No flights found matching **{criteria_type}** criteria near **{airport_code}**.")
+                
+        except Exception as e:
+            print(f"Mission search error: {e}")
+            await msg.reply(f"❌ Error during mission search: {str(e)}")
+            
+    elif msg.content.startswith("!airports "):
+        print("Airport management command received...")
+        parts = msg.content.split()
+        
+        if len(parts) < 2:
+            await msg.reply("❌ **Airport Commands:**\n" +
+                          "• `!airports list` - Show your airports\n" +
+                          "• `!airports add PHL` - Add airport to your list\n" +
+                          "• `!airports remove UKT` - Remove airport from your list\n" +
+                          "• `!airports clear` - Remove all your airports")
+            return
+            
+        command = parts[1].lower()
+        
+        # Determine username from channel
+        username = AIRPORT_MANAGER.get_user_from_channel(msg.channel.id)
+        if not username:
+            await msg.reply("❌ This command only works in user airport channels.")
+            return
+        
+        try:
+            if command == "list":
+                airports = AIRPORT_MANAGER.get_user_airports(username)
+                if airports:
+                    airports_text = ", ".join(airports)
+                    await msg.reply(f"🛫 **{username.title()}'s airports:** {airports_text}")
+                else:
+                    await msg.reply(f"📭 **{username.title()}** has no airports configured.\nUse `!airports add PHL` to add some!")
+                    
+            elif command == "add":
+                if len(parts) < 3:
+                    await msg.reply("❌ Usage: `!airports add PHL`")
+                    return
+                    
+                airport_code = parts[2].upper()
+                success, message = AIRPORT_MANAGER.add_airport(username, airport_code)
+                await msg.reply(message)
+                
+            elif command == "remove":
+                if len(parts) < 3:
+                    await msg.reply("❌ Usage: `!airports remove PHL`")
+                    return
+                    
+                airport_code = parts[2].upper()
+                success, message = AIRPORT_MANAGER.remove_airport(username, airport_code)
+                await msg.reply(message)
+                
+            elif command == "clear":
+                success, message = AIRPORT_MANAGER.clear_airports(username)
+                await msg.reply(message)
+                
+            else:
+                await msg.reply("❌ Unknown command. Use: list, add, remove, or clear")
+                
+        except Exception as e:
+            print(f"Airport management error: {e}")
+            await msg.reply(f"❌ Error: {str(e)}")
+            
+    elif msg.content.startswith("!airports_llm "):
+        print("Airport LLM command received...")
+        query = msg.content[14:].strip()  # Remove "!airports_llm "
+        
+        if not query:
+            await msg.reply("❌ **Airport LLM Assistant**\n" +
+                          "Ask me about airports in natural language!\n\n" +
+                          "**Examples:**\n" +
+                          "• `!airports_llm find dubai airport with highest traffic`\n" +
+                          "• `!airports_llm best european airport for boeing 777s`\n" +
+                          "• `!airports_llm airport near london with international flights`\n" +
+                          "• `!airports_llm what's the code for paris airport`")
+            return
+        
+        try:
+            await msg.reply("🤖 **Asking DeepSeek about airports...**")
+            
+            # Query the LLM
+            response = await AIRPORT_LLM.ask_deepseek(query)
+            
+            # Format the response nicely
+            llm_response = f"🤖 **DeepSeek Airport Assistant:**\n\n{response}\n\n" + \
+                          "💡 *Use `!airports add CODE` to add any of these airports to your list!*"
+            
+            await msg.reply(llm_response, suppress_embeds=True)
+            
+        except Exception as e:
+            print(f"Airport LLM error: {e}")
+            await msg.reply(f"❌ Error querying airport assistant: {str(e)}")
 
 @bot.event
 async def on_ready():
@@ -345,9 +506,9 @@ async def on_ready():
     
     # Start loops with error handling
     try:
-        if not pa_airports_watch.is_running():
-            pa_airports_watch.start()
-            print("PA Airport monitoring started")
+        if not multi_user_airports_watch.is_running():
+            multi_user_airports_watch.start()
+            print("Multi-user airport monitoring started")
     except Exception as e:
         print(f"❌ Failed to start airport monitoring: {e}")
         
