@@ -1,0 +1,20 @@
+{
+  "globemaster": ["C17"],
+  "chinook": ["H47"],
+  "f16": ["F16"],
+  "viper": ["F16"], 
+  "fighting falcon": ["F16"],
+  "stratolifter": ["C135"],
+  "ab-180": ["AB18"],
+  "aero boero": ["AB18"],
+  "evektor cobra": ["VUT1"],
+  "cobra": ["VUT1"],
+  "kfir": ["KFIR"],
+  "warthog": ["A10"],
+  "thunderbolt": ["A10"],
+  "a-10": ["A10"],
+  "f-16": ["F16"],
+  "c-17": ["C17"],
+  "ch-47": ["H47"],
+  "kc-135": ["C135"]
+}
