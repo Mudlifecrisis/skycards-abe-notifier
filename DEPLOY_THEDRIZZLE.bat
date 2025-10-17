@@ -8,7 +8,7 @@ echo Deploying: %MSG%
 
 git add -A
 git commit -m "%MSG%" || echo (no changes to commit)
-git push nas main || (
+git push nas master || (
     echo ❌ Push failed. Check git remote and SSH keys.
     pause
     exit /b 1
