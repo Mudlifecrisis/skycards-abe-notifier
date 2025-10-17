@@ -34,6 +34,15 @@ env/
 # Bot runtime files
 seen_alerts.json
 
+# Large aircraft database files (too big for GitHub)
+aircraft_data/*.csv
+aircraft_data/*aircraft_database*.json
+synology-deploy/aircraft_data/*.csv  
+synology-deploy/aircraft_data/*aircraft_database*.json
+
+# Deployment packages
+*.tar.gz
+
 # IDE
 .vscode/
 .idea/

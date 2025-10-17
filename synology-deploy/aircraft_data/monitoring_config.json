@@ -1,0 +1,54 @@
+{
+  "monitoring": {
+    "database_file": "aircraft_data/production_aircraft_database.json",
+    "check_interval_seconds": 15,
+    "api_timeout_seconds": 30,
+    "max_consecutive_errors": 5
+  },
+  "target_aircraft": {
+    "AB18": {
+      "name": "Aero Boero AB-180",
+      "priority": "HIGH",
+      "notify": true,
+      "sound_alert": true
+    },
+    "VUT1": {
+      "name": "Evektor Cobra",
+      "priority": "HIGH",
+      "notify": true,
+      "sound_alert": true
+    },
+    "KFIR": {
+      "name": "IAI Kfir",
+      "priority": "HIGH",
+      "notify": true,
+      "sound_alert": true
+    }
+  },
+  "other_rare_aircraft": {
+    "C17": {
+      "name": "Boeing C-17 Globemaster",
+      "priority": "MEDIUM",
+      "notify": true,
+      "sound_alert": false
+    },
+    "F16": {
+      "name": "F-16 Fighting Falcon",
+      "priority": "MEDIUM",
+      "notify": true,
+      "sound_alert": false
+    },
+    "A10": {
+      "name": "A-10 Thunderbolt II",
+      "priority": "MEDIUM",
+      "notify": true,
+      "sound_alert": false
+    }
+  },
+  "notifications": {
+    "desktop_notifications": true,
+    "sound_alerts": true,
+    "log_to_file": true,
+    "log_file": "aircraft_data/detection_log.txt"
+  }
+}

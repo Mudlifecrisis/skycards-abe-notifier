@@ -48,6 +48,10 @@ class EnhancedRareAircraftHunter:
         # Aircraft cache to avoid duplicate alerts
         self.seen_aircraft = {}
         
+        # OAuth token cache
+        self.opensky_token = None
+        self.token_expires = 0
+        
         # Quiet hours
         self.quiet_start = int(os.getenv("QUIET_START", "23"))
         self.quiet_end = int(os.getenv("QUIET_END", "6"))
@@ -172,21 +176,55 @@ No explanations, just the comma-separated list."""
         """Get all search terms"""
         return sorted(list(self.search_terms))
     
+    async def _get_opensky_token(self) -> Optional[str]:
+        """Get OAuth2 token for OpenSky API"""
+        import time
+        
+        # Return cached token if still valid
+        if self.opensky_token and time.time() < self.token_expires:
+            return self.opensky_token
+            
+        try:
+            token_url = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": self.opensky_user,
+                "client_secret": self.opensky_pass
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(token_url, data=data, timeout=30) as response:
+                    if response.status == 200:
+                        token_data = await response.json()
+                        self.opensky_token = token_data["access_token"]
+                        # Token expires in 30 minutes, refresh 5 minutes early
+                        self.token_expires = time.time() + (token_data.get("expires_in", 1800) - 300)
+                        print("OpenSky OAuth token obtained successfully")
+                        return self.opensky_token
+                    else:
+                        print(f"Failed to get OpenSky token: {response.status}")
+                        return None
+        except Exception as e:
+            print(f"Error getting OpenSky token: {e}")
+            return None
+    
     async def fetch_global_aircraft(self) -> List[Dict]:
         """Fetch all current aircraft positions from OpenSky Network"""
         try:
-            # Try with authentication first
+            # Try with OAuth2 authentication first
             if self.opensky_user and self.opensky_pass:
-                auth = aiohttp.BasicAuth(self.opensky_user, self.opensky_pass)
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(self.opensky_base, auth=auth, timeout=30) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            return self._parse_opensky_data(data)
-                        elif response.status == 401:
-                            print("OpenSky authentication failed, trying anonymous access...")
-                        else:
-                            print(f"OpenSky API error with auth: {response.status}")
+                token = await self._get_opensky_token()
+                if token:
+                    headers = {"Authorization": f"Bearer {token}"}
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(self.opensky_base, headers=headers, timeout=30) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                return self._parse_opensky_data(data)
+                            elif response.status == 401:
+                                print("OpenSky authentication failed, trying anonymous access...")
+                            else:
+                                print(f"OpenSky API error with auth: {response.status}")
             
             # Fall back to anonymous access
             async with aiohttp.ClientSession() as session:
@@ -203,7 +241,7 @@ No explanations, just the comma-separated list."""
 
     def _parse_opensky_data(self, data: Dict) -> List[Dict]:
         """Convert OpenSky state vectors to our aircraft format"""
-        if not data or 'states' not in data:
+        if not data or 'states' not in data or data['states'] is None:
             return []
             
         aircraft_list = []
@@ -275,19 +313,42 @@ No explanations, just the comma-separated list."""
         return False, ""
 
     def is_duplicate_alert(self, aircraft: Dict, matched_term: str) -> bool:
-        """Check if we've already alerted for this aircraft recently"""
+        """Check if we've already alerted for this aircraft recently or if it's ghost data"""
         icao24 = aircraft.get('icao24', '')
         callsign = aircraft.get('callsign', '')
         key = f"{icao24}_{callsign}_{matched_term}"
         now = datetime.now(timezone.utc)
         
+        # Get current position data
+        current_lat = aircraft.get('latitude')
+        current_lon = aircraft.get('longitude') 
+        current_alt = aircraft.get('altitude')
+        current_speed = aircraft.get('velocity')
+        
         if key in self.seen_aircraft:
             last_seen = datetime.fromisoformat(self.seen_aircraft[key]['last_alert'])
-            # Don't re-alert for same aircraft/term within 30 minutes
+            last_aircraft = self.seen_aircraft[key].get('aircraft', {})
+            
+            # Check for ghost aircraft - same exact position for 10+ minutes
+            if (current_lat and current_lon and current_alt is not None and 
+                last_aircraft.get('latitude') == current_lat and
+                last_aircraft.get('longitude') == current_lon and 
+                last_aircraft.get('altitude') == current_alt and
+                (now - last_seen).total_seconds() > 600):  # 10 minutes same position
+                print(f"Skipping ghost aircraft {callsign} - same position for {(now - last_seen).total_seconds()/60:.1f} minutes")
+                return True
+                
+            # Don't re-alert for same aircraft/term within 30 minutes  
             if (now - last_seen).total_seconds() < 1800:  # 30 minutes
                 return True
         
-        # Update cache
+        # Additional ghost detection - very low altitude + low speed likely stale
+        if (current_alt is not None and current_speed is not None and 
+            current_alt < 914 and current_speed < 25.7):  # <3000ft and <50kts 
+            print(f"Skipping likely stale aircraft {callsign} - low altitude ({current_alt*3.28:.0f}ft) and slow speed ({current_speed*1.94:.0f}kts)")
+            return True
+        
+        # Update cache with current position
         self.seen_aircraft[key] = {
             'last_alert': now.isoformat(),
             'aircraft': aircraft,

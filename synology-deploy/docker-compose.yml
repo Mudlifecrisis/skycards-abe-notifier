@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  skycards-bot:
+    build: .
+    container_name: skycards-bot
+    restart: unless-stopped
+    environment:
+      - TZ=America/New_York
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./aircraft_data:/app/aircraft_data
+      - ./logs:/app/logs
+      - ./data:/app/data
+    ports:
+      - "8080:8080"  # For health checks
+    networks:
+      - skycards-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/logs/bot_healthy') else 1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  skycards-network:
+    driver: bridge
+
+volumes:
+  bot-data:
+    driver: local

@@ -1,21 +1,17 @@
-#!/usr/bin/env python3
-"""
-Enhanced Rare Aircraft Hunter using production aircraft database
-Integrates with Discord bot system for real-time alerts
-"""
+# rare_hunter.py
 import aiohttp
 import asyncio
 import json
 import math
-import os
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-class EnhancedRareAircraftHunter:
-    """Enhanced rare aircraft detection using OpenSky + local aircraft database"""
+class RareAircraftHunter:
+    """Global rare aircraft detection using OpenSky Network API"""
     
     def __init__(self):
         # OpenSky API setup
@@ -34,13 +30,7 @@ class EnhancedRareAircraftHunter:
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
         self.deepseek_base = "https://api.deepseek.com/v1/chat/completions"
         
-        # Load production aircraft database
-        self.aircraft_db = {}
-        self.user_targets = {}
-        self.rare_aircraft = {}
-        self.load_aircraft_database()
-        
-        # Search terms storage (legacy support)
+        # Search terms storage
         self.search_terms = set()
         self.search_file = "rare_search_terms.json"
         self.load_search_terms()
@@ -48,52 +38,20 @@ class EnhancedRareAircraftHunter:
         # Aircraft cache to avoid duplicate alerts
         self.seen_aircraft = {}
         
-        # Quiet hours
+        # Quiet hours (use environment variables, fallback to 23-6)
         self.quiet_start = int(os.getenv("QUIET_START", "23"))
         self.quiet_end = int(os.getenv("QUIET_END", "6"))
         
-        print(f"Enhanced Rare Aircraft Hunter initialized:")
-        print(f"  Aircraft database: {len(self.aircraft_db):,} aircraft")
-        print(f"  User targets: {len(self.user_targets)} (AB18, VUT1, KFIR)")
-        print(f"  All rare aircraft: {len(self.rare_aircraft)}")
-        
-    def load_aircraft_database(self):
-        """Load the production aircraft database"""
-        try:
-            db_file = "aircraft_data/production_aircraft_database.json"
-            if os.path.exists(db_file):
-                with open(db_file, 'r') as f:
-                    db_data = json.load(f)
-                
-                self.aircraft_db = db_data.get('aircraft', {})
-                self.user_targets = db_data.get('user_targets', {})
-                self.rare_aircraft = db_data.get('rare_aircraft', {})
-                
-                print(f"Production aircraft database loaded successfully")
-            else:
-                print(f"Warning: Production database not found at {db_file}")
-        except Exception as e:
-            print(f"Error loading aircraft database: {e}")
-    
     def load_search_terms(self):
-        """Load saved search terms from file (legacy support)"""
+        """Load saved search terms from file"""
         try:
             if os.path.exists(self.search_file):
                 with open(self.search_file, 'r') as f:
                     data = json.load(f)
                     self.search_terms = set(data.get('terms', []))
-                    
-                    # Auto-add your target aircraft types if not present
-                    target_types = {'AB18', 'VUT1', 'KFIR', 'C17', 'F16', 'A10'}
-                    for aircraft_type in target_types:
-                        self.search_terms.add(aircraft_type)
-                    
-                    self.save_search_terms()
         except Exception as e:
             print(f"Error loading search terms: {e}")
-            # Set default target aircraft
-            self.search_terms = {'AB18', 'VUT1', 'KFIR', 'C17', 'F16', 'A10'}
-            self.save_search_terms()
+            self.search_terms = set()
     
     def save_search_terms(self):
         """Save search terms to file"""
@@ -233,27 +191,8 @@ No explanations, just the comma-separated list."""
             
         return aircraft_list
 
-    def matches_database(self, aircraft: Dict) -> Tuple[bool, str, str]:
-        """Check if aircraft matches our database (PRIMARY METHOD)"""
-        icao24 = aircraft.get('icao24', '').lower()
-        
-        # Check if this ICAO24 is in our aircraft database
-        if icao24 in self.aircraft_db:
-            aircraft_info = self.aircraft_db[icao24]
-            aircraft_type = aircraft_info.get('type', '').upper()
-            
-            # Check if this is a rare aircraft
-            if icao24 in self.rare_aircraft:
-                return True, aircraft_type, f"Database: {aircraft_type}"
-            
-            # Check if this matches our search terms
-            if aircraft_type in self.search_terms:
-                return True, aircraft_type, f"Search: {aircraft_type}"
-        
-        return False, "", ""
-
     def matches_search_terms(self, aircraft: Dict) -> Tuple[bool, str]:
-        """Check if aircraft matches search terms (LEGACY METHOD)"""
+        """Check if aircraft matches any search terms"""
         if not self.search_terms:
             return False, ""
             
@@ -264,21 +203,36 @@ No explanations, just the comma-separated list."""
         # Check all search terms against aircraft data
         for term in self.search_terms:
             # For ICAO codes (like B35, KC135), only match callsign prefixes
+            # Don't match random ICAO24 hex codes
             if len(term) <= 6 and term.isalnum():
+                # This is likely an aircraft type code - only match callsign
                 if callsign.startswith(term):
                     return True, term
             else:
-                # For longer terms, check callsign and country
+                # For longer terms (like STRATOTANKER), check callsign and country
                 if (term in callsign or term in country):
                     return True, term
                 
         return False, ""
 
+    def calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculate distance between two coordinates in km"""
+        R = 6371  # Earth's radius in kilometers
+        
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        a = (math.sin(delta_lat / 2) ** 2 + 
+             math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        return R * c
+
     def is_duplicate_alert(self, aircraft: Dict, matched_term: str) -> bool:
         """Check if we've already alerted for this aircraft recently"""
-        icao24 = aircraft.get('icao24', '')
-        callsign = aircraft.get('callsign', '')
-        key = f"{icao24}_{callsign}_{matched_term}"
+        key = f"{aircraft['icao24']}_{matched_term}"
         now = datetime.now(timezone.utc)
         
         if key in self.seen_aircraft:
@@ -297,106 +251,69 @@ No explanations, just the comma-separated list."""
         return False
 
     async def find_rare_aircraft(self) -> List[Dict]:
-        """Find aircraft matching our database and search terms"""
+        """Find aircraft matching search terms"""
+        if not self.search_terms:
+            return []
+            
         if self.is_quiet_hours():
             return []
             
         all_aircraft = await self.fetch_global_aircraft()
         rare_finds = []
         
-        print(f"Scanning {len(all_aircraft)} live aircraft for rare types...")
-        
-        database_matches = 0
-        search_matches = 0
-        
         for aircraft in all_aircraft:
-            icao24 = aircraft.get('icao24', '').lower()
+            is_match, matched_term = self.matches_search_terms(aircraft)
             
-            # METHOD 1: Check database first (most accurate)
-            is_db_match, aircraft_type, db_reason = self.matches_database(aircraft)
-            
-            if is_db_match:
-                database_matches += 1
-                
-                if not self.is_duplicate_alert(aircraft, aircraft_type):
-                    # Get full aircraft info from database
-                    aircraft_info = self.aircraft_db.get(icao24, {})
-                    
-                    # Enhance aircraft data
-                    aircraft['matched_term'] = aircraft_type
-                    aircraft['search_reason'] = db_reason
-                    aircraft['aircraft_info'] = aircraft_info
-                    aircraft['registration'] = aircraft_info.get('registration', 'Unknown')
-                    aircraft['model'] = aircraft_info.get('model', 'Unknown')
-                    aircraft['manufacturer'] = aircraft_info.get('manufacturer', 'Unknown')
-                    aircraft['operator'] = aircraft_info.get('operator', 'Unknown')
-                    
-                    # Check if this is a user target aircraft
-                    if icao24 in self.user_targets:
-                        aircraft['is_user_target'] = True
-                        aircraft['priority'] = 'HIGH'
-                    else:
-                        aircraft['is_user_target'] = False
-                        aircraft['priority'] = 'MEDIUM'
-                    
-                    # Add display info
-                    if aircraft.get('altitude'):
-                        aircraft['altitude_ft'] = int(aircraft['altitude'] * 3.28084)
-                    if aircraft.get('velocity'):
-                        aircraft['velocity_kts'] = int(aircraft['velocity'] * 1.944)
-                    
-                    rare_finds.append(aircraft)
-                    continue
-            
-            # METHOD 2: Legacy text matching for callsigns
-            is_text_match, matched_term = self.matches_search_terms(aircraft)
-            
-            if is_text_match and not self.is_duplicate_alert(aircraft, matched_term):
-                search_matches += 1
-                
+            if is_match and not self.is_duplicate_alert(aircraft, matched_term):
+                # Add search context
                 aircraft['matched_term'] = matched_term
-                aircraft['search_reason'] = f"Callsign search: {matched_term}"
-                aircraft['aircraft_info'] = {}
-                aircraft['registration'] = 'Unknown'
-                aircraft['model'] = 'Unknown'
-                aircraft['manufacturer'] = 'Unknown'
-                aircraft['operator'] = 'Unknown'
-                aircraft['is_user_target'] = False
-                aircraft['priority'] = 'LOW'
+                aircraft['search_reason'] = f"Matched search term: {matched_term}"
                 
-                # Add display info
+                # Add altitude in feet for display
                 if aircraft.get('altitude'):
                     aircraft['altitude_ft'] = int(aircraft['altitude'] * 3.28084)
+                
+                # Add speed in knots for display  
                 if aircraft.get('velocity'):
                     aircraft['velocity_kts'] = int(aircraft['velocity'] * 1.944)
                 
                 rare_finds.append(aircraft)
         
-        if rare_finds:
-            print(f"Found {len(rare_finds)} rare aircraft:")
-            print(f"  Database matches: {database_matches}")
-            print(f"  Search matches: {search_matches}")
-            
-            # Show user target aircraft first
-            user_targets_found = [a for a in rare_finds if a.get('is_user_target', False)]
-            if user_targets_found:
-                print(f"  USER TARGET AIRCRAFT: {len(user_targets_found)}")
-                for aircraft in user_targets_found:
-                    print(f"    {aircraft['matched_term']}: {aircraft['callsign']} ({aircraft['registration']})")
-        
         return rare_finds
 
-    def get_statistics(self) -> Dict:
-        """Get hunter statistics"""
-        return {
-            'database_aircraft': len(self.aircraft_db),
-            'user_targets': len(self.user_targets),
-            'rare_aircraft': len(self.rare_aircraft),
-            'search_terms': len(self.search_terms),
-            'seen_aircraft': len(self.seen_aircraft)
+    async def get_airport_arrivals(self, airport_iata: str) -> List[Dict]:
+        """Get aircraft approaching an airport (basic implementation with OpenSky)"""
+        # This is a simplified version - OpenSky doesn't have arrival data
+        # We'll look for aircraft near the airport coordinates
+        
+        # Airport coordinates (you'd want a proper airport database)
+        airport_coords = {
+            'ABE': (40.6520, -75.4398),  # Allentown
+            'JFK': (40.6413, -73.7781),
+            'LAX': (33.9425, -118.4081),
+            'ORD': (41.9742, -87.9073),
         }
-
-# Backward compatibility - replace the old class
-class RareAircraftHunter(EnhancedRareAircraftHunter):
-    """Backward compatible wrapper"""
-    pass
+        
+        if airport_iata.upper() not in airport_coords:
+            return []
+            
+        airport_lat, airport_lon = airport_coords[airport_iata.upper()]
+        
+        all_aircraft = await self.fetch_global_aircraft()
+        nearby_aircraft = []
+        
+        for aircraft in all_aircraft:
+            distance = self.calculate_distance(
+                airport_lat, airport_lon,
+                aircraft['latitude'], aircraft['longitude']
+            )
+            
+            # Aircraft within 50km of airport, flying below 10,000 feet
+            if (distance < 50 and 
+                aircraft.get('altitude', 0) and aircraft['altitude'] < 3048):  # 10k feet in meters
+                
+                aircraft['distance_to_airport'] = round(distance, 1)
+                aircraft['airport'] = airport_iata.upper()
+                nearby_aircraft.append(aircraft)
+        
+        return nearby_aircraft

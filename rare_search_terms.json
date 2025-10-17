@@ -1,16 +1,22 @@
 {
   "terms": [
-    "K35R",
-    "QID",
-    "RCH",
-    "GLOBEMASTER",
-    "C135",
-    "JAWS",
-    "STRATOTANKER",
-    "KC135",
-    "STRATOLIFTER",
-    "B35",
     "RC135",
-    "BADGR33"
+    "C135",
+    "B35",
+    "C17",
+    "F16",
+    "JAWS",
+    "STRATOLIFTER",
+    "QID",
+    "KFIR",
+    "BADGR33",
+    "K35R",
+    "RCH",
+    "A10",
+    "GLOBEMASTER",
+    "AB18",
+    "KC135",
+    "STRATOTANKER",
+    "VUT1"
   ]
 }
