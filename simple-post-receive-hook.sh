@@ -26,9 +26,9 @@ ln -sfn "$NEW_RELEASE" "$DEPLOY_DIR/current"
 
 # Copy files to main directory for bind mounting
 echo "[HOOK] Copying files to main directory..."
-cp -f "$NEW_RELEASE/docker-compose.yml" "$APP_DIR/docker-compose.yml"
-cp -f "$NEW_RELEASE/bot.py" "$APP_DIR/bot.py"
-cp -f "$NEW_RELEASE/rare_hunter.py" "$APP_DIR/rare_hunter.py"
+cp -f "$NEW_RELEASE/synology-deploy/docker-compose.yml" "$APP_DIR/docker-compose.yml"
+cp -f "$NEW_RELEASE/synology-deploy/bot.py" "$APP_DIR/bot.py"
+cp -f "$NEW_RELEASE/synology-deploy/rare_hunter.py" "$APP_DIR/rare_hunter.py"
 cp -f "$NEW_RELEASE/aliases.json" "$APP_DIR/aliases.json"
 cp -f "$NEW_RELEASE/requirements.txt" "$APP_DIR/requirements.txt"
 
