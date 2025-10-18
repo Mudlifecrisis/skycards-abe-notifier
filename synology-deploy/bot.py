@@ -4,6 +4,8 @@ import aiohttp
 import asyncio
 from datetime import datetime
 import pytz
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import discord
 from discord.ext import tasks
@@ -41,6 +43,10 @@ GLOW_ROLE_ID = int(os.getenv("GLOW_ROLE_ID", "0"))
 QUIET_START = int(os.getenv("QUIET_START", "0"))  # 0 disables if both 0
 QUIET_END = int(os.getenv("QUIET_END", "0"))
 
+# Admin sync configuration
+ADMIN_SYNC_TOKEN = os.getenv("ADMIN_SYNC_TOKEN", "sync-token-12345")
+DEV_GUILD_ID = os.getenv("DEV_GUILD_ID", "")
+
 # Objects
 intents = discord.Intents.default()
 intents.message_content = True  # Re-enable for full functionality
@@ -59,6 +65,62 @@ AIRPORT_LLM = AirportLLMAssistant()
 # Now handled by AIRPORT_MANAGER
 
 AERODATABOX_BASE = "https://aerodatabox.p.rapidapi.com"
+
+# Admin sync functionality
+async def do_sync():
+    """Force sync slash commands"""
+    try:
+        if DEV_GUILD_ID and DEV_GUILD_ID.strip():
+            # Guild sync (instant)
+            guild = discord.Object(id=int(DEV_GUILD_ID))
+            synced = await tree.sync(guild=guild)
+            print(f"✅ Synced {len(synced)} commands to guild {DEV_GUILD_ID}")
+            return f"synced {len(synced)} guild commands"
+        else:
+            # Global sync (slower)
+            synced = await tree.sync()
+            print(f"✅ Synced {len(synced)} global commands")
+            return f"synced {len(synced)} global commands"
+    except Exception as e:
+        error_msg = f"sync failed: {str(e)}"
+        print(f"❌ {error_msg}")
+        return error_msg
+
+class SyncHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/admin/sync":
+            return self._send(404, "not found")
+        
+        token = self.headers.get("x-token", "")
+        if token != ADMIN_SYNC_TOKEN:
+            return self._send(403, "forbidden")
+        
+        try:
+            # Run sync in bot's event loop
+            future = asyncio.run_coroutine_threadsafe(do_sync(), bot.loop)
+            result = future.result(timeout=30)
+            self._send(200, result)
+        except Exception as e:
+            self._send(500, f"error: {str(e)}")
+
+    def _send(self, code, msg):
+        self.send_response(code)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(msg.encode())
+
+    def log_message(self, format, *args):
+        # Suppress HTTP server logs
+        pass
+
+def start_sync_server():
+    """Start HTTP sync server"""
+    try:
+        httpd = HTTPServer(("0.0.0.0", 8765), SyncHandler)
+        print("🔧 Admin sync server started on port 8765")
+        httpd.serve_forever()
+    except Exception as e:
+        print(f"❌ Failed to start sync server: {e}")
 
 async def fetch_arrivals(dst_iata: str) -> list[dict]:
     # Use FIDS endpoint for airport arrivals and departures
@@ -673,6 +735,10 @@ async def on_reaction_add(reaction, user):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (id: {bot.user.id})")
+    
+    # Start admin sync server
+    threading.Thread(target=start_sync_server, daemon=True).start()
+    
     try:
         # Get your Discord server (guild) for instant command sync
         guild_id = CHANNEL_ID  # We'll derive guild from channel
