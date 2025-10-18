@@ -176,6 +176,11 @@ No explanations, just the comma-separated list."""
         """Get all search terms"""
         return sorted(list(self.search_terms))
     
+    def clear_search_terms(self):
+        """Clear all search terms"""
+        self.search_terms.clear()
+        self.save_search_terms()
+    
     async def _get_opensky_token(self) -> Optional[str]:
         """Get OAuth2 token for OpenSky API"""
         import time

@@ -795,6 +795,34 @@ async def _list_search(inter: discord.Interaction):
         print(f"Error in list_search: {e}")
         await inter.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
 
+@tree.command(name="clear_search", description="Clear all aircraft search terms")
+async def _clear_search(inter: discord.Interaction):
+    try:
+        terms = HUNTER.get_search_terms()
+        term_count = len(terms)
+        
+        if term_count == 0:
+            await inter.response.send_message("🔍 No search terms to clear.", ephemeral=True)
+            return
+            
+        # Clear all search terms
+        HUNTER.clear_search_terms()
+        
+        embed = discord.Embed(
+            title="🗑️ Search Terms Cleared",
+            description=f"Removed **{term_count}** aircraft search terms.",
+            color=0xFF4444
+        )
+        embed.add_field(name="Previously Searching For", value=", ".join(terms[:10]), inline=False)
+        if term_count > 10:
+            embed.add_field(name="", value=f"...and {term_count-10} more", inline=False)
+            
+        await inter.response.send_message(embed=embed, ephemeral=False)
+        
+    except Exception as e:
+        print(f"Error in clear_search: {e}")
+        await inter.response.send_message(f"❌ Error clearing search terms: {str(e)}", ephemeral=True)
+
 @tree.command(name="hunt_stats", description="Show rare aircraft hunting statistics")
 async def _hunt_stats(inter: discord.Interaction):
     terms = HUNTER.get_search_terms()
