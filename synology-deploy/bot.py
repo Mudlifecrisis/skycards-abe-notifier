@@ -11,6 +11,10 @@ import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
 
+# Version banner for deployment tracking
+VERSION = os.getenv("SC_VERSION", f"dev-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+print(f"🤖 [Skycards] Starting version={VERSION}")
+
 from alert_window import should_alert_window, pick_eta, minutes_until
 from rarity import RarityLookup, rarity_tier
 from alerts_sources import LiveSignal

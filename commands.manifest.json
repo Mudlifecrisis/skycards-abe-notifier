@@ -1,0 +1,66 @@
+{
+  "scope": "guild",
+  "guild_id": "",
+  "commands": [
+    {
+      "name": "watch",
+      "description": "Set alert window (minutes)",
+      "options": [
+        {
+          "name": "minutes",
+          "description": "Alert window in minutes",
+          "type": "integer",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "rarity_min",
+      "description": "Set minimum rarity threshold",
+      "options": [
+        {
+          "name": "threshold",
+          "description": "Minimum rarity (1-5)",
+          "type": "integer",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "add_search",
+      "description": "Add aircraft search term with AI suggestions",
+      "options": [
+        {
+          "name": "term",
+          "description": "Aircraft search term",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "remove_search",
+      "description": "Remove aircraft search term",
+      "options": [
+        {
+          "name": "term",
+          "description": "Search term to remove",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_search",
+      "description": "List all aircraft search terms"
+    },
+    {
+      "name": "hunt_stats",
+      "description": "Show rare aircraft hunting statistics"
+    },
+    {
+      "name": "clear_search",
+      "description": "Clear all aircraft search terms"
+    }
+  ]
+}
